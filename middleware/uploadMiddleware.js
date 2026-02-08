@@ -7,6 +7,7 @@ const uploadDirs = {
   hotels: "uploads/hotels",
   categories: "uploads/categories",
   rooms: "uploads/rooms",
+  menu: "uploads/menu",
 };
 
 Object.values(uploadDirs).forEach((dir) => {
@@ -70,6 +71,14 @@ const uploadRoom = multer({
   fileFilter: fileFilter,
 });
 
+const uploadMenu = multer({
+  storage: createStorage(uploadDirs.menu),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB max file size
+  },
+  fileFilter: fileFilter,
+});
+
 // Middleware for hotel images (max 3)
 const uploadHotelImages = uploadHotel.array("images", 3);
 
@@ -78,6 +87,9 @@ const uploadCategoryImages = uploadCategory.array("images", 3);
 
 // Middleware for room images (max 3)
 const uploadRoomImages = uploadRoom.array("images", 3);
+
+// Middleware for menu image (single file)
+const uploadMenuImage = uploadMenu.single("image");
 
 // Error handler middleware
 const handleUploadError = (err, req, res, next) => {
@@ -177,6 +189,7 @@ module.exports = {
   uploadHotelImages,
   uploadCategoryImages,
   uploadRoomImages,
+  uploadMenuImage,
   handleUploadError,
   getImageUrls,
   deleteImages,

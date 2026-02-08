@@ -26,6 +26,7 @@ const register = async (req, res) => {
     currentAddress,
     role,
     loginID = generateLoginID(), // Generate if not provided
+    isRestaurant,
   } = req.body;
 
   // Check for required fields
@@ -72,6 +73,7 @@ const register = async (req, res) => {
       role: roleInfo,
       loginID,
       hotelID: [], // Initialize empty hotelID array (optional)
+      isRestaurant: isRestaurant !== undefined ? Boolean(isRestaurant) : false,
     });
 
     res.status(201).json({
@@ -95,7 +97,7 @@ const register = async (req, res) => {
 
 // User login
 const login = async (req, res) => {
-  const { loginID, password, latitude, longitude, publicIP, loginTime } =
+  const { loginID, password, latitude, longitude, publicIP, loginTime, isRestaurant } =
     req.body;
 
   try {
@@ -122,6 +124,7 @@ const login = async (req, res) => {
       longitude: longitude || "0.0",
       publicIP: publicIP || "Unknown",
       loginTime: formattedLoginTime,
+      isRestaurant: isRestaurant !== undefined ? Boolean(isRestaurant) : false,
     });
 
     await user.save();
@@ -141,6 +144,7 @@ const login = async (req, res) => {
         hotelID: user.hotelID, // Now matches the schema
         // loginHistory: user.loginHistory,
         permission: user.permission,
+        isRestaurant: user.isRestaurant,
       },
     });
   } catch (error) {
@@ -175,6 +179,7 @@ const getAllUsers = async (req, res) => {
           longitude: history.longitude,
           publicIP: history.publicIP,
           loginTime: history.loginTime,
+          isRestaurant: history.isRestaurant,
         })),
       })),
     });
@@ -230,6 +235,7 @@ const updateUser = async (req, res) => {
       image: updatedUser.image,
       hotelID: updatedUser.hotelID.map((item) => ({ hotelID: item.hotelID })),
       permission: updatedUser.permission,
+      isRestaurant: updatedUser.isRestaurant,
     };
 
     res.status(200).json({

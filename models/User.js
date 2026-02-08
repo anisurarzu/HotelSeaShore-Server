@@ -49,12 +49,14 @@ const UserSchema = new mongoose.Schema(
         },
       ],
     },
+    isRestaurant: { type: Boolean, default: false },
     loginHistory: [
       {
         latitude: { type: String, default: "0.0" },
         longitude: { type: String, default: "0.0" },
         publicIP: { type: String, default: "Unknown" },
         loginTime: { type: Date, default: Date.now },
+        isRestaurant: { type: Boolean, default: false },
       },
     ],
   },

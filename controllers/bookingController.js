@@ -1,4 +1,5 @@
 const Booking = require("../models/Booking");
+const Hotel = require("../models/Hotel");
 
 // Helper function to check for overlapping bookings
 // Two date ranges overlap if: startA < endB && startB < endA
@@ -253,14 +254,25 @@ const updateBooking = async (req, res) => {
 // @route GET /api/bookings
 const getBookings = async (req, res) => {
   try {
-    // const bookings = await Booking.find({ statusID: { $ne: 255 } }).sort({
-    //   createdAt: -1,
-    // });
-    // Fetch and sort bookings
-    const bookings = await Booking.find().sort({ createdAt: -1 });
+    // Fetch bookings excluding cancelled ones and filter out null/invalid entries
+    const bookings = await Booking.find({ 
+      statusID: { $ne: 255 },
+      fullName: { $exists: true, $ne: null, $ne: "" },
+      bookingNo: { $exists: true, $ne: null, $ne: "" }
+    })
+    .sort({ createdAt: -1 })
+    .lean();
 
-    // Respond with bookings array
-    res.status(200).json(bookings);
+    // Filter out any remaining invalid bookings
+    const validBookings = bookings.filter(booking => 
+      booking && 
+      booking._id && 
+      booking.fullName && 
+      booking.bookingNo
+    );
+
+    // Respond with valid bookings array
+    res.status(200).json(validBookings);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -285,18 +297,31 @@ const getBookingsByHotelId = async (req, res) => {
         .json({ error: "Invalid hotelID. Must be a number." });
     }
 
-    // Find all bookings associated with the given hotelID and sort by creation date (latest first)
-    const bookings = await Booking.find({ hotelID: numericHotelID }).sort({
-      createdAt: -1,
-    });
+    // Find all bookings associated with the given hotelID, exclude cancelled, and filter invalid
+    const bookings = await Booking.find({ 
+      hotelID: numericHotelID,
+      statusID: { $ne: 255 },
+      fullName: { $exists: true, $ne: null, $ne: "" },
+      bookingNo: { $exists: true, $ne: null, $ne: "" }
+    })
+    .sort({ createdAt: -1 })
+    .lean();
 
-    if (bookings.length === 0) {
+    // Filter out any remaining invalid bookings
+    const validBookings = bookings.filter(booking => 
+      booking && 
+      booking._id && 
+      booking.fullName && 
+      booking.bookingNo
+    );
+
+    if (validBookings.length === 0) {
       return res
         .status(404)
         .json({ error: "No bookings found for this hotel ID" });
     }
 
-    res.status(200).json(bookings);
+    res.status(200).json(validBookings);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -308,7 +333,7 @@ const getBookingsByBookingNo = async (req, res) => {
 
   try {
     // Find all bookings that have the same bookingNo
-    const bookings = await Booking.find({ bookingNo: bookingNo });
+    const bookings = await Booking.find({ bookingNo: bookingNo }).lean();
 
     if (bookings.length === 0) {
       return res
@@ -316,7 +341,35 @@ const getBookingsByBookingNo = async (req, res) => {
         .json({ error: "No bookings found for this booking number" });
     }
 
-    res.status(200).json(bookings);
+    // Get unique hotel IDs from bookings
+    const hotelIDs = [...new Set(bookings.map(booking => booking.hotelID).filter(Boolean))];
+
+    // Fetch hotels data
+    const hotels = await Hotel.find({ hotelID: { $in: hotelIDs } })
+      .select("hotelID images hotelName")
+      .lean();
+
+    // Create a map of hotelID to hotel data for quick lookup
+    const hotelMap = {};
+    hotels.forEach(hotel => {
+      hotelMap[hotel.hotelID] = {
+        hotelName: hotel.hotelName,
+        hotelLogo: hotel.images && hotel.images.length > 0 ? hotel.images[0] : null, // First image as logo
+        hotelImages: hotel.images || []
+      };
+    });
+
+    // Add hotel logo to each booking
+    const bookingsWithHotelLogo = bookings.map(booking => {
+      const hotelData = hotelMap[booking.hotelID] || {};
+      return {
+        ...booking,
+        hotelLogo: hotelData.hotelLogo || null,
+        hotelImages: hotelData.hotelImages || []
+      };
+    });
+
+    res.status(200).json(bookingsWithHotelLogo);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

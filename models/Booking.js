@@ -170,6 +170,11 @@ const BookingSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    invoiceNo: {
+      type: String,
+      trim: true,
+      index: true,
+    },
     statusID: {
       type: Number,
       default: 1,
@@ -194,6 +199,7 @@ const BookingSchema = new mongoose.Schema(
 BookingSchema.index({ hotelID: 1, statusID: 1 });
 BookingSchema.index({ checkInDate: 1 });
 BookingSchema.index({ bookingNo: 1 });
+BookingSchema.index({ invoiceNo: 1 });
 BookingSchema.index({ statusID: 1 });
 
 // Pre-save hook to calculate due payment

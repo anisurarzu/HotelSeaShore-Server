@@ -11,6 +11,10 @@ const bookingRoutes = require("./routes/bookingRoutes");
 const dailySummaryRoutes = require("./routes/dailySummary");
 const expenseRoutes = require("./routes/expense");
 const permissionRoutes = require("./routes/permissionRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
+const menuRoutes = require("./routes/restaurant/menuRoutes");
+const orderRoutes = require("./routes/restaurant/orderRoutes");
+const tableRoutes = require("./routes/restaurant/tableRoutes");
 require("dotenv").config();
 
 const app = express();
@@ -75,6 +79,10 @@ app.use("/api", bookingRoutes);
 app.use("/api", dailySummaryRoutes);
 app.use("/api/expenses", expenseRoutes);
 app.use("/api", permissionRoutes);
+app.use("/api", dashboardRoutes);
+app.use("/api", menuRoutes);
+app.use("/api", orderRoutes);
+app.use("/api", tableRoutes);
 
 // Health check endpoint
 app.get("/", (req, res) => {

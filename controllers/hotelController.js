@@ -1,6 +1,5 @@
 const Hotel = require("../models/Hotel");
 const mongoose = require("mongoose");
-const { getImageUrls, deleteImages } = require("../middleware/uploadMiddleware");
 
 // ============================================
 // HELPER FUNCTIONS
@@ -77,12 +76,8 @@ const createHotel = async (req, res) => {
   try {
     const hotelData = req.body;
 
-    // Handle image uploads
-    if (req.files && req.files.length > 0) {
-      const imageUrls = getImageUrls(req);
-      hotelData.images = imageUrls;
-    } else if (req.body.images) {
-      // If images are provided as URLs in body (for backward compatibility)
+    // Handle images from request body (image URLs from imgbb)
+    if (req.body.images) {
       hotelData.images = Array.isArray(req.body.images) ? req.body.images : [req.body.images];
     }
 
@@ -110,11 +105,6 @@ const createHotel = async (req, res) => {
     );
   } catch (error) {
     console.error("Create hotel error:", error);
-
-    // Clean up uploaded files on error
-    if (req.files && req.files.length > 0) {
-      deleteImages(req.files.map((file) => file.path));
-    }
 
     if (error.code === 11000) {
       return sendErrorResponse(
@@ -252,22 +242,11 @@ const updateHotel = async (req, res) => {
     }
 
     if (!hotel) {
-      // Clean up uploaded files if hotel not found
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(res, 404, "Hotel not found");
     }
 
-    // Handle image uploads
-    if (req.files && req.files.length > 0) {
-      const imageUrls = getImageUrls(req);
-      // Merge with existing images (max 3 total)
-      const existingImages = hotel.images || [];
-      const newImages = [...existingImages, ...imageUrls].slice(0, 3); // Keep max 3
-      updateData.images = newImages;
-    } else if (req.body.images) {
-      // If images are provided as URLs in body
+    // Handle images from request body (image URLs from imgbb)
+    if (req.body.images) {
       updateData.images = Array.isArray(req.body.images) ? req.body.images.slice(0, 3) : [req.body.images];
     }
 
@@ -285,11 +264,6 @@ const updateHotel = async (req, res) => {
     return sendSuccessResponse(res, 200, "Hotel updated successfully", hotel);
   } catch (error) {
     console.error("Update hotel error:", error);
-
-    // Clean up uploaded files on error
-    if (req.files && req.files.length > 0) {
-      deleteImages(req.files.map((file) => file.path));
-    }
 
     if (error.name === "ValidationError") {
       const errors = Object.values(error.errors).map((err) => ({
@@ -351,11 +325,8 @@ const addCategory = async (req, res) => {
     const { hotelId } = req.params;
     const categoryData = req.body;
 
-    // Handle image uploads
-    if (req.files && req.files.length > 0) {
-      const imageUrls = getImageUrls(req);
-      categoryData.images = imageUrls;
-    } else if (req.body.images) {
+    // Handle images from request body (image URLs from imgbb)
+    if (req.body.images) {
       categoryData.images = Array.isArray(req.body.images) ? req.body.images : [req.body.images];
     }
 
@@ -368,10 +339,6 @@ const addCategory = async (req, res) => {
     }
 
     if (!hotel) {
-      // Clean up uploaded files if hotel not found
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(res, 404, "Hotel not found");
     }
 
@@ -381,10 +348,6 @@ const addCategory = async (req, res) => {
     );
 
     if (existingCategory) {
-      // Clean up uploaded files if category exists
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(
         res,
         409,
@@ -413,10 +376,6 @@ const addCategory = async (req, res) => {
     );
   } catch (error) {
     console.error("Add category error:", error);
-    // Clean up uploaded files on error
-    if (req.files && req.files.length > 0) {
-      deleteImages(req.files.map((file) => file.path));
-    }
     return sendErrorResponse(res, 500, "Failed to add category");
   }
 };
@@ -472,31 +431,17 @@ const updateCategory = async (req, res) => {
     }
 
     if (!hotel) {
-      // Clean up uploaded files if hotel not found
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(res, 404, "Hotel not found");
     }
 
     // Find category
     const category = hotel.roomCategories.id(categoryId);
     if (!category) {
-      // Clean up uploaded files if category not found
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(res, 404, "Category not found");
     }
 
-    // Handle image uploads
-    if (req.files && req.files.length > 0) {
-      const imageUrls = getImageUrls(req);
-      // Merge with existing images (max 3 total)
-      const existingImages = category.images || [];
-      const newImages = [...existingImages, ...imageUrls].slice(0, 3); // Keep max 3
-      updateData.images = newImages;
-    } else if (req.body.images) {
+    // Handle images from request body (image URLs from imgbb)
+    if (req.body.images) {
       updateData.images = Array.isArray(req.body.images) ? req.body.images.slice(0, 3) : [req.body.images];
     }
 
@@ -514,10 +459,6 @@ const updateCategory = async (req, res) => {
     return sendSuccessResponse(res, 200, "Category updated successfully", category);
   } catch (error) {
     console.error("Update category error:", error);
-    // Clean up uploaded files on error
-    if (req.files && req.files.length > 0) {
-      deleteImages(req.files.map((file) => file.path));
-    }
     return sendErrorResponse(res, 500, "Failed to update category");
   }
 };
@@ -581,11 +522,8 @@ const addRoom = async (req, res) => {
     const { hotelId, categoryId } = req.params;
     const roomData = req.body;
 
-    // Handle image uploads
-    if (req.files && req.files.length > 0) {
-      const imageUrls = getImageUrls(req);
-      roomData.images = imageUrls;
-    } else if (req.body.images) {
+    // Handle images from request body (image URLs from imgbb)
+    if (req.body.images) {
       roomData.images = Array.isArray(req.body.images) ? req.body.images : [req.body.images];
     }
 
@@ -598,20 +536,12 @@ const addRoom = async (req, res) => {
     }
 
     if (!hotel) {
-      // Clean up uploaded files if hotel not found
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(res, 404, "Hotel not found");
     }
 
     // Find category
     const category = hotel.roomCategories.id(categoryId);
     if (!category) {
-      // Clean up uploaded files if category not found
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(res, 404, "Category not found");
     }
 
@@ -621,10 +551,6 @@ const addRoom = async (req, res) => {
     );
 
     if (existingRoom) {
-      // Clean up uploaded files if room exists
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(
         res,
         409,
@@ -650,10 +576,6 @@ const addRoom = async (req, res) => {
     return sendSuccessResponse(res, 201, "Room added successfully", addedRoom);
   } catch (error) {
     console.error("Add room error:", error);
-    // Clean up uploaded files on error
-    if (req.files && req.files.length > 0) {
-      deleteImages(req.files.map((file) => file.path));
-    }
     return sendErrorResponse(res, 500, "Failed to add room");
   }
 };
@@ -718,41 +640,23 @@ const updateRoom = async (req, res) => {
     }
 
     if (!hotel) {
-      // Clean up uploaded files if hotel not found
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(res, 404, "Hotel not found");
     }
 
     // Find category
     const category = hotel.roomCategories.id(categoryId);
     if (!category) {
-      // Clean up uploaded files if category not found
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(res, 404, "Category not found");
     }
 
     // Find room
     const room = category.roomNumbers.id(roomId);
     if (!room) {
-      // Clean up uploaded files if room not found
-      if (req.files && req.files.length > 0) {
-        deleteImages(req.files.map((file) => file.path));
-      }
       return sendErrorResponse(res, 404, "Room not found");
     }
 
-    // Handle image uploads
-    if (req.files && req.files.length > 0) {
-      const imageUrls = getImageUrls(req);
-      // Merge with existing images (max 3 total)
-      const existingImages = room.images || [];
-      const newImages = [...existingImages, ...imageUrls].slice(0, 3); // Keep max 3
-      updateData.images = newImages;
-    } else if (req.body.images) {
+    // Handle images from request body (image URLs from imgbb)
+    if (req.body.images) {
       updateData.images = Array.isArray(req.body.images) ? req.body.images.slice(0, 3) : [req.body.images];
     }
 
@@ -772,10 +676,6 @@ const updateRoom = async (req, res) => {
     return sendSuccessResponse(res, 200, "Room updated successfully", room);
   } catch (error) {
     console.error("Update room error:", error);
-    // Clean up uploaded files on error
-    if (req.files && req.files.length > 0) {
-      deleteImages(req.files.map((file) => file.path));
-    }
     return sendErrorResponse(res, 500, "Failed to update room");
   }
 };

@@ -8,12 +8,6 @@ const {
   validateRoom,
   validateMongoId,
 } = require("../utils/validators");
-const {
-  uploadHotelImages,
-  uploadCategoryImages,
-  uploadRoomImages,
-  handleUploadError,
-} = require("../middleware/uploadMiddleware");
 
 // ============================================
 // HOTEL ROUTES
@@ -23,13 +17,11 @@ const {
  * @route   POST /api/hotels
  * @desc    Create a new hotel
  * @access  Private
- * @form-data images (max 3 files, field name: "images")
+ * @body    images: Array of image URLs (strings) from imgbb
  */
 router.post(
   "/hotels",
   protect,
-  uploadHotelImages,
-  handleUploadError,
   validateHotel,
   HotelController.createHotel
 );
@@ -53,13 +45,11 @@ router.get("/hotels/:id", protect, HotelController.getHotelById);
  * @route   PUT /api/hotels/:id
  * @desc    Update hotel
  * @access  Private
- * @form-data images (max 3 files, field name: "images")
+ * @body    images: Array of image URLs (strings) from imgbb
  */
 router.put(
   "/hotels/:id",
   protect,
-  uploadHotelImages,
-  handleUploadError,
   validateHotel,
   HotelController.updateHotel
 );
@@ -79,13 +69,11 @@ router.delete("/hotels/:id", protect, HotelController.deleteHotel);
  * @route   POST /api/hotels/:hotelId/categories
  * @desc    Add category to hotel
  * @access  Private
- * @form-data images (max 3 files, field name: "images")
+ * @body    images: Array of image URLs (strings) from imgbb
  */
 router.post(
   "/hotels/:hotelId/categories",
   protect,
-  uploadCategoryImages,
-  handleUploadError,
   validateHotelCategory,
   HotelController.addCategory
 );
@@ -105,13 +93,11 @@ router.get(
  * @route   PUT /api/hotels/:hotelId/categories/:categoryId
  * @desc    Update category in hotel
  * @access  Private
- * @form-data images (max 3 files, field name: "images")
+ * @body    images: Array of image URLs (strings) from imgbb
  */
 router.put(
   "/hotels/:hotelId/categories/:categoryId",
   protect,
-  uploadCategoryImages,
-  handleUploadError,
   validateHotelCategory,
   HotelController.updateCategory
 );
@@ -135,13 +121,11 @@ router.delete(
  * @route   POST /api/hotels/:hotelId/categories/:categoryId/rooms
  * @desc    Add room to category
  * @access  Private
- * @form-data images (max 3 files, field name: "images")
+ * @body    images: Array of image URLs (strings) from imgbb
  */
 router.post(
   "/hotels/:hotelId/categories/:categoryId/rooms",
   protect,
-  uploadRoomImages,
-  handleUploadError,
   validateRoom,
   HotelController.addRoom
 );
@@ -161,13 +145,11 @@ router.get(
  * @route   PUT /api/hotels/:hotelId/categories/:categoryId/rooms/:roomId
  * @desc    Update room in category
  * @access  Private
- * @form-data images (max 3 files, field name: "images")
+ * @body    images: Array of image URLs (strings) from imgbb
  */
 router.put(
   "/hotels/:hotelId/categories/:categoryId/rooms/:roomId",
   protect,
-  uploadRoomImages,
-  handleUploadError,
   validateRoom,
   HotelController.updateRoom
 );
@@ -191,13 +173,11 @@ router.delete(
  * @route   POST /api/hotel
  * @desc    Create hotel (legacy)
  * @access  Private
- * @form-data images (max 3 files, field name: "images")
+ * @body    images: Array of image URLs (strings) from imgbb
  */
 router.post(
   "/hotel",
   protect,
-  uploadHotelImages,
-  handleUploadError,
   validateHotel,
   HotelController.createHotel
 );
@@ -213,13 +193,11 @@ router.get("/hotel", protect, HotelController.getHotels);
  * @route   PUT /api/hotel/:id
  * @desc    Update hotel (legacy)
  * @access  Private
- * @form-data images (max 3 files, field name: "images")
+ * @body    images: Array of image URLs (strings) from imgbb
  */
 router.put(
   "/hotel/:id",
   protect,
-  uploadHotelImages,
-  handleUploadError,
   validateHotel,
   HotelController.updateHotel
 );
