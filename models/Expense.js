@@ -3,8 +3,13 @@ const mongoose = require("mongoose");
 const expenseSchema = new mongoose.Schema({
   expenseNo: {
     type: String,
-    required: true,
+    required: false,
     unique: true,
+    sparse: true,
+  },
+  expenseCategory: {
+    type: String,
+    required: false,
   },
   expenseReason: {
     type: String,
