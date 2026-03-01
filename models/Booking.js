@@ -107,6 +107,12 @@ const BookingSchema = new mongoose.Schema(
       required: [true, "Due payment is required"],
       min: [0, "Due payment cannot be negative"],
     },
+    totalPaid: {
+      type: Number,
+      default: 0,
+      min: [0, "Total paid cannot be negative"],
+      required: false,
+    },
     paymentMethod: {
       type: String,
       enum: ["CASH", "BKASH", "NAGAD", "BANK", "CARD", "OTHER"],
@@ -186,6 +192,28 @@ const BookingSchema = new mongoose.Schema(
     reason: {
       type: String,
       trim: true,
+    },
+    // Optional: date-wise daily amount entries (e.g. for extended stay breakdown)
+    dailyAmounts: {
+      type: [
+        {
+          date: { type: Date, required: true },
+          dailyAmount: { type: Number, required: true, min: 0 },
+        },
+      ],
+      default: [],
+      required: false,
+    },
+    // Optional: invoice details (date-wise daily amounts) – same as dailyAmounts, from frontend payload
+    invoiceDetails: {
+      type: [
+        {
+          date: { type: Date, required: true },
+          dailyAmount: { type: Number, required: true, min: 0 },
+        },
+      ],
+      default: [],
+      required: false,
     },
   },
   {

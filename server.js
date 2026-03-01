@@ -4,6 +4,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const connectDB = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
+const userRoutes = require("./routes/userRoutes");
 const hotelCategoryRoutes = require("./routes/hotelCategoryRoutes");
 const roomRoutes = require("./routes/roomRoutes");
 const hotelRoutes = require("./routes/hotelRoutes");
@@ -73,6 +74,7 @@ io.on("connection", (socket) => {
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api", userRoutes); // Users & Agents: GET/POST /api/users, PUT/DELETE /api/users/:id
 app.use("/api", hotelCategoryRoutes);
 app.use("/api", roomRoutes);
 app.use("/api", hotelRoutes);

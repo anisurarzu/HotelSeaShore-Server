@@ -2,30 +2,15 @@ const mongoose = require("mongoose");
 
 const permissionItemSchema = new mongoose.Schema(
   {
-    pageName: {
-      type: String,
-      required: [true, "Page name is required"],
-      trim: false,
-    },
-    viewAccess: {
-      type: Boolean,
-      default: false,
-    },
-    editAccess: {
-      type: Boolean,
-      default: false,
-    },
-    deleteAccess: {
-      type: Boolean,
-      default: false,
-    },
-    insertAccess: {
-      type: Boolean,
-      default: false,
-    },
+    pageKey: { type: String, trim: true },
+    pageName: { type: String, trim: false },
+    viewAccess: { type: Boolean, default: false },
+    insertAccess: { type: Boolean, default: false },
+    editAccess: { type: Boolean, default: false },
+    deleteAccess: { type: Boolean, default: false },
   },
   { _id: false }
-); // Prevent automatic _id creation for sub-documents
+);
 
 const permissionSchema = new mongoose.Schema(
   {
@@ -37,13 +22,13 @@ const permissionSchema = new mongoose.Schema(
     },
     permissions: {
       type: [permissionItemSchema],
+      default: [],
       validate: {
         validator: function (arr) {
-          // Check for duplicate pageNames within the same document
-          const pageNames = arr.map((item) => item.pageName);
-          return new Set(pageNames).size === pageNames.length;
+          const keys = arr.map((item) => item.pageKey || item.pageName).filter(Boolean);
+          return keys.length === 0 || new Set(keys).size === keys.length;
         },
-        message: "Duplicate page names in permissions array",
+        message: "Duplicate page (pageKey/pageName) in permissions array",
       },
     },
   },

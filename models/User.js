@@ -8,6 +8,11 @@ function generateLoginID() {
 
 const UserSchema = new mongoose.Schema(
   {
+    key: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
     loginID: {
       type: String,
       unique: true,
@@ -20,20 +25,20 @@ const UserSchema = new mongoose.Schema(
       default: "male",
     },
     email: { type: String, required: true, unique: true },
-    phoneNumber: { type: String, required: true, unique: true },
-    currentAddress: { type: String, required: true },
+    phoneNumber: { type: String, default: "" },
+    currentAddress: { type: String, default: "" },
     role: {
       id: { type: Number, required: true },
       value: { type: String, required: true },
       label: { type: String, required: true },
     },
     password: { type: String, required: true },
-    plainPassword: { type: String, required: true },
+    plainPassword: { type: String }, // Optional; do not store from frontend
     statusID: { type: Number, default: 1 },
     hotelID: [
       {
-        hotelID: { type: Number, required: true },
-        hotelName: { type: String }, // Optional, can be populated later
+        hotelID: { type: mongoose.Schema.Types.Mixed, required: true }, // Number or string for display
+        hotelName: { type: String },
       },
     ],
     permission: {

@@ -169,7 +169,15 @@ const createBooking = async (req, res) => {
 // @route PUT /api/bookings/:id
 const updateBooking = async (req, res) => {
   const { id } = req.params;
-  const bookingData = req.body;
+  const bookingData = { ...req.body };
+
+  // Ensure invoice details (date-wise amounts) are stored when provided
+  if (Array.isArray(req.body.invoiceDetails)) {
+    bookingData.invoiceDetails = req.body.invoiceDetails.map((item) => ({
+      date: item.date ? new Date(item.date) : item.date,
+      dailyAmount: typeof item.dailyAmount === "number" ? item.dailyAmount : Number(item.dailyAmount) || 0,
+    }));
+  }
 
   try {
     // Get existing booking to check if dates or room are being changed
@@ -327,6 +335,55 @@ const getBookingsByHotelId = async (req, res) => {
   }
 };
 
+// @desc Get bookings by check-in date
+// @route GET /api/bookings/checkIn?checkInDate=YYYY-MM-DD
+const getBookingsByCheckInDate = async (req, res) => {
+  const { checkInDate } = req.query;
+
+  try {
+    if (!checkInDate) {
+      return res.status(400).json({ error: "checkInDate query parameter is required (e.g. ?checkInDate=2025-03-01)" });
+    }
+
+    const date = new Date(checkInDate);
+    if (isNaN(date.getTime())) {
+      return res.status(400).json({ error: "Invalid checkInDate format. Use YYYY-MM-DD." });
+    }
+
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const bookings = await Booking.find({
+      checkInDate: { $gte: startOfDay, $lte: endOfDay },
+      statusID: { $ne: 255 },
+      fullName: { $exists: true, $ne: null, $ne: "" },
+      bookingNo: { $exists: true, $ne: null, $ne: "" },
+    })
+      .sort({ checkInDate: 1, createdAt: -1 })
+      .lean();
+
+    const validBookings = bookings.filter(
+      (booking) =>
+        booking &&
+        booking._id &&
+        booking.fullName &&
+        booking.bookingNo
+    );
+
+    // Include dailyAmounts (date-wise invoice details) on each booking
+    const bookingsWithInvoiceDetails = validBookings.map((booking) => ({
+      ...booking,
+      dailyAmounts: Array.isArray(booking.dailyAmounts) ? booking.dailyAmounts : [],
+    }));
+
+    res.status(200).json(bookingsWithInvoiceDetails);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // @desc Get multiple bookings by bookingNo
 const getBookingsByBookingNo = async (req, res) => {
   const { bookingNo } = req.params;
@@ -344,32 +401,63 @@ const getBookingsByBookingNo = async (req, res) => {
     // Get unique hotel IDs from bookings
     const hotelIDs = [...new Set(bookings.map(booking => booking.hotelID).filter(Boolean))];
 
-    // Fetch hotels data
+    // Fetch full hotel data including address and details
     const hotels = await Hotel.find({ hotelID: { $in: hotelIDs } })
-      .select("hotelID images hotelName")
+      .select(
+        "hotelID hotelName hotelDescription address contact location amenities images rating status totalRooms availableRooms createTime"
+      )
       .lean();
 
-    // Create a map of hotelID to hotel data for quick lookup
+    // Create a map of hotelID to full hotel information for quick lookup
     const hotelMap = {};
     hotels.forEach(hotel => {
       hotelMap[hotel.hotelID] = {
+        hotelID: hotel.hotelID,
         hotelName: hotel.hotelName,
-        hotelLogo: hotel.images && hotel.images.length > 0 ? hotel.images[0] : null, // First image as logo
-        hotelImages: hotel.images || []
+        hotelDescription: hotel.hotelDescription,
+        address: hotel.address || {},
+        contact: hotel.contact || {},
+        location: hotel.location || {},
+        amenities: hotel.amenities || [],
+        images: hotel.images || [],
+        hotelLogo: hotel.images && hotel.images.length > 0 ? hotel.images[0] : null,
+        rating: hotel.rating,
+        status: hotel.status,
+        totalRooms: hotel.totalRooms,
+        availableRooms: hotel.availableRooms,
+        createTime: hotel.createTime,
       };
     });
 
-    // Add hotel logo to each booking
-    const bookingsWithHotelLogo = bookings.map(booking => {
-      const hotelData = hotelMap[booking.hotelID] || {};
+    // Add full hotelInformation (and legacy hotelLogo/hotelImages) to each booking
+    const bookingsWithHotelInfo = bookings.map(booking => {
+      const hotelInfo = hotelMap[booking.hotelID] || {};
       return {
         ...booking,
-        hotelLogo: hotelData.hotelLogo || null,
-        hotelImages: hotelData.hotelImages || []
+        hotelLogo: hotelInfo.hotelLogo || null,
+        hotelImages: hotelInfo.images || [],
+        hotelInformation: hotelInfo.hotelID
+          ? {
+              hotelID: hotelInfo.hotelID,
+              hotelName: hotelInfo.hotelName,
+              hotelDescription: hotelInfo.hotelDescription,
+              address: hotelInfo.address,
+              contact: hotelInfo.contact,
+              location: hotelInfo.location,
+              amenities: hotelInfo.amenities,
+              images: hotelInfo.images,
+              hotelLogo: hotelInfo.hotelLogo,
+              rating: hotelInfo.rating,
+              status: hotelInfo.status,
+              totalRooms: hotelInfo.totalRooms,
+              availableRooms: hotelInfo.availableRooms,
+              createTime: hotelInfo.createTime,
+            }
+          : null,
       };
     });
 
-    res.status(200).json(bookingsWithHotelLogo);
+    res.status(200).json(bookingsWithHotelInfo);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -529,6 +617,7 @@ module.exports = {
   updateBooking,
   getBookings,
   getBookingsByHotelId,
+  getBookingsByCheckInDate,
   getBookingById,
   deleteBooking,
   getBookingsByBookingNo,

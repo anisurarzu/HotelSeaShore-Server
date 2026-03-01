@@ -1,21 +1,19 @@
+/**
+ * Users & Agents controller
+ * Handles user list, create, update, delete with role, permission, and hotelID (with hotelName).
+ * Use these endpoints for the Users & Agents / Agent Information frontend page.
+ */
 const User = require("../models/User");
 const Hotel = require("../models/Hotel");
 const Permission = require("../models/Permission");
-const jwt = require("jsonwebtoken");
-const dayjs = require("dayjs");
-const utc = require("dayjs/plugin/utc");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
-dayjs.extend(utc);
-require("dotenv").config();
 
-// Helper function to generate loginID
 function generateLoginID() {
   const randomDigits = Math.floor(1000 + Math.random() * 9000);
   return `FTB-${randomDigits}`;
 }
 
-// Build a map of hotelID (number or string) -> hotelName from Hotel collection
 async function getHotelNameMap() {
   const hotels = await Hotel.find({}).select("hotelID hotelName").lean();
   const map = {};
@@ -26,7 +24,6 @@ async function getHotelNameMap() {
   return map;
 }
 
-// Format user for API response (Users & Agents page): role { value, label }, permission { _id, permissionName, permissions }, hotelID [ { hotelID, hotelName } ]
 function formatUser(user, hotelNameMap = {}) {
   const u = user.toObject ? user.toObject() : user;
   const hotelIDList = Array.isArray(u.hotelID) ? u.hotelID : [];
@@ -48,9 +45,14 @@ function formatUser(user, hotelNameMap = {}) {
     gender: u.gender,
     image: u.image,
     role: u.role ? { id: u.role.id, value: u.role.value, label: u.role.label } : undefined,
-    permission: u.permission && (u.permission._id || u.permission.permissionName)
-      ? { _id: u.permission._id, permissionName: u.permission.permissionName, permissions: u.permission.permissions }
-      : undefined,
+    permission:
+      u.permission && (u.permission._id || u.permission.permissionName)
+        ? {
+            _id: u.permission._id,
+            permissionName: u.permission.permissionName,
+            permissions: u.permission.permissions,
+          }
+        : undefined,
     hotelID: hotelIDFormatted,
     statusID: u.statusID,
     isRestaurant: u.isRestaurant,
@@ -59,15 +61,32 @@ function formatUser(user, hotelNameMap = {}) {
   };
 }
 
-// Register a new user (create user for Users & Agents page)
-const register = async (req, res) => {
+// GET /api/users – list all active users (Users & Agents page)
+const getUsers = async (req, res) => {
+  try {
+    const users = await User.find({ statusID: { $ne: 255 } })
+      .sort({ createdAt: -1 })
+      .select("-password -plainPassword")
+      .lean();
+
+    const hotelNameMap = await getHotelNameMap();
+    const formatted = users.map((u) => formatUser(u, hotelNameMap));
+
+    res.status(200).json({ users: formatted });
+  } catch (error) {
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+// POST /api/users – create user (Users & Agents page)
+const createUser = async (req, res) => {
   const {
     image,
     username,
     gender,
     email,
     password,
-    plainPassword, // Do not store; used only for validation/sync on frontend
+    plainPassword,
     phoneNumber,
     currentAddress,
     role,
@@ -105,7 +124,12 @@ const register = async (req, res) => {
     let permissionDoc = permission;
     if (permission && permission._id && !permission.permissionName) {
       const found = await Permission.findById(permission._id).lean();
-      if (found) permissionDoc = { _id: found._id, permissionName: found.permissionName, permissions: found.permissions };
+      if (found)
+        permissionDoc = {
+          _id: found._id,
+          permissionName: found.permissionName,
+          permissions: found.permissions,
+        };
     }
 
     const hotelIDArray = Array.isArray(hotelIDPayload)
@@ -140,7 +164,7 @@ const register = async (req, res) => {
     const formatted = formatUser(user, hotelNameMap);
 
     res.status(201).json({
-      message: "Registration successful",
+      message: "User created successfully",
       user: formatted,
     });
   } catch (error) {
@@ -154,95 +178,26 @@ const register = async (req, res) => {
   }
 };
 
-// User login
-const login = async (req, res) => {
-  const { loginID, password, latitude, longitude, publicIP, loginTime, isRestaurant } =
-    req.body;
-
-  try {
-    const user = await User.findOne({ loginID });
-    if (!user) {
-      return res.status(400).json({ error: "Invalid credentials" });
-    }
-
-    const isMatch = await user.matchPassword(password);
-    if (!isMatch) {
-      return res.status(400).json({ error: "Invalid credentials" });
-    }
-
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "10h",
-    });
-
-    // Format login time
-    const formattedLoginTime = loginTime || dayjs().utc().format();
-
-    // Add login history
-    user.loginHistory.push({
-      latitude: latitude || "0.0",
-      longitude: longitude || "0.0",
-      publicIP: publicIP || "Unknown",
-      loginTime: formattedLoginTime,
-      isRestaurant: isRestaurant !== undefined ? Boolean(isRestaurant) : false,
-    });
-
-    await user.save();
-
-    // Return the hotelID array as is (now properly structured)
-    res.status(200).json({
-      token,
-      user: {
-        id: user._id,
-        loginID: user.loginID,
-        username: user.username,
-        email: user.email,
-        phoneNumber: user.phoneNumber,
-        currentAddress: user.currentAddress,
-        role: user.role,
-        image: user.image,
-        hotelID: user.hotelID, // Now matches the schema
-        // loginHistory: user.loginHistory,
-        permission: user.permission,
-        isRestaurant: user.isRestaurant,
-      },
-    });
-  } catch (error) {
-    console.error("Login Error:", error);
-    res.status(500).json({ error: "Server error" });
-  }
-};
-
-// Get all active users (Users & Agents page)
-const getAllUsers = async (req, res) => {
-  try {
-    const users = await User.find({ statusID: { $ne: 255 } })
-      .sort({ createdAt: -1 })
-      .select("-password -plainPassword")
-      .lean();
-
-    const hotelNameMap = await getHotelNameMap();
-    const formatted = users.map((u) => formatUser(u, hotelNameMap));
-
-    res.status(200).json({ users: formatted });
-  } catch (error) {
-    res.status(500).json({ error: "Server error" });
-  }
-};
-
-// Update user information (Users & Agents page)
+// PUT /api/users/:id – update user (Users & Agents page)
 const updateUser = async (req, res) => {
   const { id } = req.params;
   const updateData = { ...req.body };
 
   try {
-    delete updateData.plainPassword; // Never store plainPassword from frontend
+    delete updateData.plainPassword;
 
     if (updateData.email) {
-      const existing = await User.findOne({ email: updateData.email.trim().toLowerCase(), _id: { $ne: id } });
+      const existing = await User.findOne({
+        email: updateData.email.trim().toLowerCase(),
+        _id: { $ne: id },
+      });
       if (existing) return res.status(400).json({ error: "Email already in use" });
     }
     if (updateData.loginID) {
-      const existing = await User.findOne({ loginID: updateData.loginID.trim(), _id: { $ne: id } });
+      const existing = await User.findOne({
+        loginID: updateData.loginID.trim(),
+        _id: { $ne: id },
+      });
       if (existing) return res.status(400).json({ error: "Login ID already in use" });
     }
 
@@ -256,7 +211,12 @@ const updateUser = async (req, res) => {
     if (updateData.permission) {
       if (updateData.permission._id && !updateData.permission.permissionName) {
         const found = await Permission.findById(updateData.permission._id).lean();
-        if (found) updateData.permission = { _id: found._id, permissionName: found.permissionName, permissions: found.permissions };
+        if (found)
+          updateData.permission = {
+            _id: found._id,
+            permissionName: found.permissionName,
+            permissions: found.permissions,
+          };
       }
     }
 
@@ -308,36 +268,8 @@ const updateUser = async (req, res) => {
   }
 };
 
-// Soft delete user (set statusID to 255)
-const updateStatusID = async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const user = await User.findByIdAndUpdate(
-      id,
-      { statusID: 255 },
-      { new: true }
-    ).select("-password -plainPassword");
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    res.status(200).json({
-      message: "User deactivated successfully",
-      user: {
-        id: user._id,
-        loginID: user.loginID,
-        statusID: user.statusID,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Server error" });
-  }
-};
-
-// Delete user (permanent). Used by DELETE /auth/users/:id
-const hardDeleteUser = async (req, res) => {
+// DELETE /api/users/:id – delete user (Users & Agents page)
+const deleteUser = async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -357,10 +289,8 @@ const hardDeleteUser = async (req, res) => {
 };
 
 module.exports = {
-  register,
-  login,
-  getAllUsers,
+  getUsers,
+  createUser,
   updateUser,
-  updateStatusID,
-  hardDeleteUser,
+  deleteUser,
 };
