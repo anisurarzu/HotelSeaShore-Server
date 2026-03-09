@@ -242,18 +242,23 @@ const updateBooking = async (req, res) => {
       }
     }
 
-    // Update the booking
-    const booking = await Booking.findByIdAndUpdate(id, bookingData, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!booking) {
-      return res.status(404).json({ error: "Booking not found" });
+    // Apply only the fields that were sent (partial update). Use save() instead of
+    // findByIdAndUpdate so path validators (advancePayment <= totalBill, checkOut > checkIn)
+    // run against the full document, not just the update payload.
+    const keysToUpdate = Object.keys(bookingData);
+    for (const key of keysToUpdate) {
+      if (bookingData[key] !== undefined && key in existingBooking.schema.paths) {
+        existingBooking[key] = bookingData[key];
+      }
     }
+    const booking = await existingBooking.save();
 
     res.status(200).json({ message: "Booking updated successfully", booking });
   } catch (error) {
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({ error: messages.join(", ") });
+    }
     res.status(400).json({ error: error.message });
   }
 };
@@ -263,13 +268,12 @@ const updateBooking = async (req, res) => {
 const getBookings = async (req, res) => {
   try {
     // Fetch bookings excluding cancelled ones and filter out null/invalid entries
-    const bookings = await Booking.find({ 
-      statusID: { $ne: 255 },
+    const bookings = await Booking.find({
       fullName: { $exists: true, $ne: null, $ne: "" },
-      bookingNo: { $exists: true, $ne: null, $ne: "" }
+      bookingNo: { $exists: true, $ne: null, $ne: "" },
     })
-    .sort({ createdAt: -1 })
-    .lean();
+      .sort({ createdAt: -1 })
+      .lean();
 
     // Filter out any remaining invalid bookings
     const validBookings = bookings.filter(booking => 
@@ -306,14 +310,13 @@ const getBookingsByHotelId = async (req, res) => {
     }
 
     // Find all bookings associated with the given hotelID, exclude cancelled, and filter invalid
-    const bookings = await Booking.find({ 
+    const bookings = await Booking.find({
       hotelID: numericHotelID,
-      statusID: { $ne: 255 },
       fullName: { $exists: true, $ne: null, $ne: "" },
-      bookingNo: { $exists: true, $ne: null, $ne: "" }
+      bookingNo: { $exists: true, $ne: null, $ne: "" },
     })
-    .sort({ createdAt: -1 })
-    .lean();
+      .sort({ createdAt: -1 })
+      .lean();
 
     // Filter out any remaining invalid bookings
     const validBookings = bookings.filter(booking => 
@@ -357,7 +360,6 @@ const getBookingsByCheckInDate = async (req, res) => {
 
     const bookings = await Booking.find({
       checkInDate: { $gte: startOfDay, $lte: endOfDay },
-      statusID: { $ne: 255 },
       fullName: { $exists: true, $ne: null, $ne: "" },
       bookingNo: { $exists: true, $ne: null, $ne: "" },
     })
@@ -510,13 +512,34 @@ const updateStatusID = async (req, res) => {
   }
 };
 
-// @desc Delete a booking
-// @route DELETE /api/bookings/:id
+// @desc Soft delete a booking (set statusID = 255)
+// @route DELETE /api/booking/soft/:id
+const softDeleteBooking = async (req, res) => {
+  const { id } = req.params;
+  const { canceledBy, reason } = req.body || {};
+
+  try {
+    const booking = await Booking.findByIdAndUpdate(
+      id,
+      { statusID: 255, ...(canceledBy != null && { canceledBy }), ...(reason != null && { reason }) },
+      { new: true }
+    );
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+    res.status(200).json({ message: "Booking deleted successfully", booking });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc Delete a booking – HARD DELETE (permanently remove from database)
+// @route DELETE /api/booking/:id
 const deleteBooking = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const booking = await Booking.findByIdAndDelete(id);
+    const booking = await Booking.findByIdAndDelete(id); // Hard delete – document removed from DB
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
@@ -622,5 +645,6 @@ module.exports = {
   deleteBooking,
   getBookingsByBookingNo,
   updateStatusID,
+  softDeleteBooking,
   getBookingStats,
 };

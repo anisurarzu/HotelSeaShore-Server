@@ -36,12 +36,15 @@ router.post(
 // @desc Update an existing booking
 // @route PUT /api/bookings/:id
 router.put("/booking/:id", protect, BookingController.updateBooking);
-// @route PUT /api/bookings/:id
+// @route PUT /api/booking/soft/:id – set statusID = 255 (body: canceledBy, reason)
 router.put("/booking/soft/:id", protect, BookingController.updateStatusID);
 
-// @desc Delete a booking
+// @desc Soft delete booking (set statusID = 255)
+// @route DELETE /api/booking/soft/:id
+router.delete("/booking/soft/:id", protect, BookingController.softDeleteBooking);
 
-// @route DELETE /api/bookings/:id
+// @desc Hard delete booking (remove from database)
+// @route DELETE /api/booking/:id
 router.delete("/booking/:id", protect, BookingController.deleteBooking);
 
 module.exports = router;
