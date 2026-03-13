@@ -491,7 +491,7 @@ const deleteCategory = async (req, res) => {
     }
 
     const categoryName = category.name;
-    category.remove();
+    category.deleteOne();
     await hotel.save();
 
     // Emit real-time event
@@ -714,7 +714,7 @@ const deleteRoom = async (req, res) => {
     }
 
     const roomName = room.name;
-    room.remove();
+    room.deleteOne();
     await hotel.save();
 
     // Emit real-time event

@@ -327,36 +327,35 @@ const validateHotel = [
     .withMessage("Hotel name is required")
     .isLength({ min: 2, max: 100 })
     .withMessage("Hotel name must be between 2 and 100 characters"),
-  
+
+  // Make description optional. If provided (non-empty), only enforce max length.
   body("hotelDescription")
+    .optional({ checkFalsy: true })
     .trim()
-    .notEmpty()
-    .withMessage("Hotel description is required")
-    .isLength({ min: 10, max: 1000 })
-    .withMessage("Hotel description must be between 10 and 1000 characters"),
-  
+    .isLength({ min: 0, max: 1000 })
+    .withMessage("Hotel description must be less than 1000 characters"),
+
   body("address.street")
     .optional()
     .trim()
     .isLength({ max: 200 })
     .withMessage("Street address must be less than 200 characters"),
-  
+
+  // Allow any string (including phone-like) for contact.email; no strict email validation
   body("contact.email")
     .optional()
-    .isEmail()
-    .withMessage("Please provide a valid email address")
-    .normalizeEmail(),
-  
+    .trim(),
+
   body("contact.phone")
     .optional()
     .matches(/^[+]?[(]?[0-9]{1,4}[)]?[-\s.]?[(]?[0-9]{1,4}[)]?[-\s.]?[0-9]{1,9}$/)
     .withMessage("Please provide a valid phone number"),
-  
+
   body("status")
     .optional()
     .isIn(["active", "inactive", "maintenance"])
     .withMessage("Status must be active, inactive, or maintenance"),
-  
+
   (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {

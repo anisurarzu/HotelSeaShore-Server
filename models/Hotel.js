@@ -167,9 +167,11 @@ const HotelSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    // Hotel description is now optional; frontend may send empty string
     hotelDescription: {
       type: String,
-      required: true,
+      required: false,
+      default: "",
     },
     address: {
       street: {
@@ -189,6 +191,15 @@ const HotelSchema = new mongoose.Schema(
         required: false,
       },
       country: {
+        type: String,
+        required: false,
+      },
+      // Additional address lines used by frontend (address1/address2)
+      address1: {
+        type: String,
+        required: false,
+      },
+      address2: {
         type: String,
         required: false,
       },
