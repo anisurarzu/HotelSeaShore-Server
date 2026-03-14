@@ -122,6 +122,22 @@ const BookingSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    // Multiple payment entries: each with paymentMethod, amount, transactionId
+    payments: {
+      type: [
+        {
+          paymentMethod: {
+            type: String,
+            enum: ["CASH", "BKASH", "NAGAD", "BANK", "CARD", "OTHER"],
+            default: "CASH",
+          },
+          amount: { type: Number, required: true, min: 0 },
+          transactionId: { type: String, trim: true, default: "" },
+        },
+      ],
+      default: [],
+      required: false,
+    },
     note: {
       type: String,
       trim: true,

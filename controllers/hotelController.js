@@ -45,6 +45,46 @@ const sendErrorResponse = (res, statusCode, message, errors = null) => {
 };
 
 /**
+ * Normalize hotel payload: ensure address (address1, address2, address3) and images are set correctly
+ */
+const normalizeHotelPayload = (body) => {
+  const data = { ...body };
+
+  // Images: accept string or array, always store as array of strings
+  if (data.images !== undefined) {
+    data.images = Array.isArray(data.images)
+      ? data.images.map((url) => (typeof url === "string" ? url.trim() : String(url))).filter(Boolean)
+      : typeof data.images === "string" && data.images.trim()
+        ? [data.images.trim()]
+        : [];
+  }
+  if (data.image !== undefined && data.images === undefined) {
+    const url = typeof data.image === "string" ? data.image.trim() : String(data.image);
+    data.images = url ? [url] : [];
+  }
+
+  // Address: ensure address1, address2, address3 and other fields are preserved
+  if (data.address && typeof data.address === "object") {
+    data.address = {
+      street: data.address.street ?? "",
+      city: data.address.city ?? "",
+      state: data.address.state ?? "",
+      zipCode: data.address.zipCode ?? "",
+      country: data.address.country ?? "",
+      address1: data.address.address1 ?? "",
+      address2: data.address.address2 ?? "",
+      address3: data.address.address3 ?? "",
+    };
+  }
+
+  // checkInTime, checkOutTime (e.g. "14:00", "11:00")
+  if (data.checkInTime !== undefined) data.checkInTime = typeof data.checkInTime === "string" ? data.checkInTime.trim() : String(data.checkInTime || "");
+  if (data.checkOutTime !== undefined) data.checkOutTime = typeof data.checkOutTime === "string" ? data.checkOutTime.trim() : String(data.checkOutTime || "");
+
+  return data;
+};
+
+/**
  * Emit real-time event if Socket.io is available
  */
 const emitHotelEvent = (req, event, data) => {
@@ -74,17 +114,10 @@ const emitHotelEvent = (req, event, data) => {
  */
 const createHotel = async (req, res) => {
   try {
-    const hotelData = req.body;
+    const hotelData = normalizeHotelPayload(req.body);
 
-    // Handle images from request body (image URLs from imgbb)
-    if (req.body.images) {
-      hotelData.images = Array.isArray(req.body.images) ? req.body.images : [req.body.images];
-    }
-
-    // Generate hotel ID
     const hotelID = await getNextHotelID();
 
-    // Create hotel
     const hotel = await Hotel.create({
       ...hotelData,
       hotelID,
@@ -204,17 +237,29 @@ const getHotelById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Try to find by MongoDB _id first, then by hotelID
     let hotel;
     if (mongoose.Types.ObjectId.isValid(id)) {
-      hotel = await Hotel.findById(id);
+      hotel = await Hotel.findById(id).lean();
     } else {
-      hotel = await Hotel.findOne({ hotelID: parseInt(id) });
+      hotel = await Hotel.findOne({ hotelID: parseInt(id) }).lean();
     }
 
     if (!hotel) {
       return sendErrorResponse(res, 404, "Hotel not found");
     }
+
+    hotel.address = {
+      street: hotel.address?.street ?? "",
+      city: hotel.address?.city ?? "",
+      state: hotel.address?.state ?? "",
+      zipCode: hotel.address?.zipCode ?? "",
+      country: hotel.address?.country ?? "",
+      address1: hotel.address?.address1 ?? "",
+      address2: hotel.address?.address2 ?? "",
+      address3: hotel.address?.address3 ?? "",
+    };
+    hotel.checkInTime = hotel.checkInTime ?? "";
+    hotel.checkOutTime = hotel.checkOutTime ?? "";
 
     return sendSuccessResponse(res, 200, "Hotel retrieved successfully", hotel);
   } catch (error) {
@@ -231,9 +276,8 @@ const getHotelById = async (req, res) => {
 const updateHotel = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const updateData = normalizeHotelPayload(req.body);
 
-    // Find hotel
     let hotel;
     if (mongoose.Types.ObjectId.isValid(id)) {
       hotel = await Hotel.findById(id);
@@ -245,13 +289,16 @@ const updateHotel = async (req, res) => {
       return sendErrorResponse(res, 404, "Hotel not found");
     }
 
-    // Handle images from request body (image URLs from imgbb)
-    if (req.body.images) {
-      updateData.images = Array.isArray(req.body.images) ? req.body.images.slice(0, 3) : [req.body.images];
+    const addressUpdate = updateData.address;
+    if (addressUpdate) delete updateData.address;
+
+    Object.assign(hotel, updateData);
+
+    if (addressUpdate && typeof addressUpdate === "object") {
+      const current = hotel.address && (typeof hotel.address.toObject === "function" ? hotel.address.toObject() : hotel.address) || {};
+      hotel.address = { ...current, ...addressUpdate };
     }
 
-    // Update hotel
-    Object.assign(hotel, updateData);
     await hotel.save();
 
     // Emit real-time event

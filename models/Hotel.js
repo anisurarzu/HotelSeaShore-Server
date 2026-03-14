@@ -194,15 +194,9 @@ const HotelSchema = new mongoose.Schema(
         type: String,
         required: false,
       },
-      // Additional address lines used by frontend (address1/address2)
-      address1: {
-        type: String,
-        required: false,
-      },
-      address2: {
-        type: String,
-        required: false,
-      },
+      address1: { type: String, required: false },
+      address2: { type: String, required: false },
+      address3: { type: String, required: false },
     },
     contact: {
       phone: {
@@ -247,6 +241,8 @@ const HotelSchema = new mongoose.Schema(
       enum: ["active", "inactive", "maintenance"],
       default: "active",
     },
+    checkInTime: { type: String, default: "", trim: true },
+    checkOutTime: { type: String, default: "", trim: true },
     roomCategories: {
       type: [RoomCategorySchema],
       default: [],

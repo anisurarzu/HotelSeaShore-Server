@@ -85,6 +85,16 @@ const generateBookingNo = async () => {
   return newBookingNo;
 };
 
+const PAYMENT_METHODS = ["CASH", "BKASH", "NAGAD", "BANK", "CARD", "OTHER"];
+function normalizePayments(payments) {
+  if (!Array.isArray(payments)) return [];
+  return payments.map((item) => ({
+    paymentMethod: PAYMENT_METHODS.includes(item.paymentMethod) ? item.paymentMethod : "CASH",
+    amount: typeof item.amount === "number" ? item.amount : Number(item.amount) || 0,
+    transactionId: item.transactionId != null ? String(item.transactionId).trim() : "",
+  }));
+}
+
 // @desc Create a new booking
 // @route POST /api/bookings
 const createBooking = async (req, res) => {
@@ -152,7 +162,10 @@ const createBooking = async (req, res) => {
       bookingNo = await generateBookingNo();
     }
 
-    // Create the new booking with either the referenced or new bookingNo
+    if (Array.isArray(bookingData.payments)) {
+      bookingData.payments = normalizePayments(bookingData.payments);
+    }
+
     const booking = await Booking.create({
       ...bookingData,
       bookingNo,
@@ -171,12 +184,14 @@ const updateBooking = async (req, res) => {
   const { id } = req.params;
   const bookingData = { ...req.body };
 
-  // Ensure invoice details (date-wise amounts) are stored when provided
   if (Array.isArray(req.body.invoiceDetails)) {
     bookingData.invoiceDetails = req.body.invoiceDetails.map((item) => ({
       date: item.date ? new Date(item.date) : item.date,
       dailyAmount: typeof item.dailyAmount === "number" ? item.dailyAmount : Number(item.dailyAmount) || 0,
     }));
+  }
+  if (Array.isArray(req.body.payments)) {
+    bookingData.payments = normalizePayments(req.body.payments);
   }
 
   try {
