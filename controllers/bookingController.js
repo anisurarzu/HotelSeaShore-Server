@@ -92,7 +92,40 @@ function normalizePayments(payments) {
     paymentMethod: PAYMENT_METHODS.includes(item.paymentMethod) ? item.paymentMethod : "CASH",
     amount: typeof item.amount === "number" ? item.amount : Number(item.amount) || 0,
     transactionId: item.transactionId != null ? String(item.transactionId).trim() : "",
+    createdAt: item.createdAt ? new Date(item.createdAt) : new Date(),
   }));
+}
+
+// dailyAmounts / invoiceDetails theke CASH payment entries; per date ses value (last wins)
+function dailyAmountsToPayments(items) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const byDate = new Map();
+  const now = new Date();
+  items.forEach((item) => {
+    const date = item.date ? new Date(item.date) : now;
+    const dateKey = date.toISOString().slice(0, 10);
+    const amount = typeof item.dailyAmount === "number" ? item.dailyAmount : Number(item.dailyAmount) || 0;
+    byDate.set(dateKey, { date, amount });
+  });
+  return Array.from(byDate.values()).map(({ date, amount }) => ({
+    paymentMethod: "CASH",
+    amount,
+    transactionId: "",
+    createdAt: date,
+  }));
+}
+
+// Each (date, paymentMethod) e ekta single entry – last value thakbe (CASH daily + normal CASH + other methods same)
+function collapsePaymentsByDateAndMethod(payments) {
+  if (!Array.isArray(payments) || payments.length === 0) return [];
+  const byKey = new Map();
+  payments.forEach((p) => {
+    const dateStr = p.createdAt ? new Date(p.createdAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const method = PAYMENT_METHODS.includes(p.paymentMethod) ? p.paymentMethod : "CASH";
+    const key = `${dateStr}:${method}`;
+    byKey.set(key, { ...p, paymentMethod: method });
+  });
+  return Array.from(byKey.values()).sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
 }
 
 // @desc Create a new booking
@@ -162,8 +195,31 @@ const createBooking = async (req, res) => {
       bookingNo = await generateBookingNo();
     }
 
-    if (Array.isArray(bookingData.payments)) {
+    // All payments (initial theke) payments array er vetorei thakbe
+    if (Array.isArray(bookingData.payments) && bookingData.payments.length > 0) {
       bookingData.payments = normalizePayments(bookingData.payments);
+    } else if (bookingData.advancePayment != null || bookingData.paymentMethod || bookingData.transactionId) {
+      bookingData.payments = normalizePayments([
+        {
+          paymentMethod: bookingData.paymentMethod || "CASH",
+          amount: Number(bookingData.advancePayment) || 0,
+          transactionId: bookingData.transactionId || "",
+        },
+      ]);
+    } else {
+      bookingData.payments = [];
+    }
+
+    // dailyAmounts / invoiceDetails (CASH) + normal payments – sob eki array te; per (date, method) ses value thakbe
+    const dailyPayments = dailyAmountsToPayments(bookingData.invoiceDetails || bookingData.dailyAmounts);
+    if (dailyPayments.length > 0) {
+      bookingData.payments = [...bookingData.payments, ...dailyPayments];
+    }
+    bookingData.payments = collapsePaymentsByDateAndMethod(bookingData.payments);
+
+    if (bookingData.paymentMethod !== undefined) {
+      const pm = String(bookingData.paymentMethod).trim();
+      bookingData.paymentMethod = PAYMENT_METHODS.includes(pm) ? pm : "";
     }
 
     const booking = await Booking.create({
@@ -190,12 +246,19 @@ const updateBooking = async (req, res) => {
       dailyAmount: typeof item.dailyAmount === "number" ? item.dailyAmount : Number(item.dailyAmount) || 0,
     }));
   }
-  if (Array.isArray(req.body.payments)) {
-    bookingData.payments = normalizePayments(req.body.payments);
+  // payments: (1) body theke explicit entries (2) invoiceDetails = daily amount – per date ses value thakbe, ager vad
+  const fromBody = Array.isArray(req.body.payments) && req.body.payments.length > 0 ? normalizePayments(req.body.payments) : [];
+  const hasInvoiceDetails = Array.isArray(bookingData.invoiceDetails) && bookingData.invoiceDetails.length > 0;
+  const fromDaily = hasInvoiceDetails ? dailyAmountsToPayments(bookingData.invoiceDetails) : [];
+  if (fromBody.length > 0 || fromDaily.length > 0) delete bookingData.payments;
+
+  // Top-level paymentMethod optional; payments array is the source of truth
+  if (bookingData.paymentMethod !== undefined) {
+    const pm = String(bookingData.paymentMethod).trim();
+    bookingData.paymentMethod = PAYMENT_METHODS.includes(pm) ? pm : "";
   }
 
   try {
-    // Get existing booking to check if dates or room are being changed
     const existingBooking = await Booking.findById(id);
     if (!existingBooking) {
       return res.status(404).json({ error: "Booking not found" });
@@ -257,14 +320,29 @@ const updateBooking = async (req, res) => {
       }
     }
 
-    // Apply only the fields that were sent (partial update). Use save() instead of
-    // findByIdAndUpdate so path validators (advancePayment <= totalBill, checkOut > checkIn)
-    // run against the full document, not just the update payload.
     const keysToUpdate = Object.keys(bookingData);
     for (const key of keysToUpdate) {
       if (bookingData[key] !== undefined && key in existingBooking.schema.paths) {
         existingBooking[key] = bookingData[key];
       }
+    }
+    // payments: existing + fromDaily + fromBody merge kore, then per (date, paymentMethod) ekta single entry – last value
+    if (fromBody.length > 0 || fromDaily.length > 0) {
+      let existing = Array.isArray(existingBooking.payments) ? existingBooking.payments : [];
+      const datesInInvoice = new Set(
+        (bookingData.invoiceDetails || []).map((item) => (item.date ? new Date(item.date).toISOString().slice(0, 10) : ""))
+      );
+      if (fromDaily.length > 0 && datesInInvoice.size > 0) {
+        existing = existing.filter((p) => {
+          if (p.paymentMethod === "CASH" && p.createdAt) {
+            const d = new Date(p.createdAt).toISOString().slice(0, 10);
+            return !datesInInvoice.has(d);
+          }
+          return true;
+        });
+      }
+      const merged = [...existing, ...fromDaily, ...fromBody];
+      existingBooking.payments = collapsePaymentsByDateAndMethod(merged);
     }
     const booking = await existingBooking.save();
 

@@ -113,16 +113,20 @@ const BookingSchema = new mongoose.Schema(
       min: [0, "Total paid cannot be negative"],
       required: false,
     },
+    // Optional – payment details are in payments[] array; kept for backward compatibility only
     paymentMethod: {
       type: String,
-      enum: ["CASH", "BKASH", "NAGAD", "BANK", "CARD", "OTHER"],
-      default: "CASH",
+      enum: ["", "CASH", "BKASH", "NAGAD", "BANK", "CARD", "OTHER"],
+      default: "",
+      required: false,
     },
     transactionId: {
       type: String,
       trim: true,
+      default: "",
+      required: false,
     },
-    // Multiple payment entries: each with paymentMethod, amount, transactionId
+    // Multiple payment entries: each with paymentMethod, amount, transactionId, createdAt
     payments: {
       type: [
         {
@@ -133,6 +137,7 @@ const BookingSchema = new mongoose.Schema(
           },
           amount: { type: Number, required: true, min: 0 },
           transactionId: { type: String, trim: true, default: "" },
+          createdAt: { type: Date, default: Date.now },
         },
       ],
       default: [],
