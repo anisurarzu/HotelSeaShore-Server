@@ -50,6 +50,17 @@ const sendErrorResponse = (res, statusCode, message, errors = null) => {
 const normalizeHotelPayload = (body) => {
   const data = { ...body };
 
+  // Terms & Conditions: accept string or array, always store as array of strings
+  if (data.termsAndConditions !== undefined) {
+    data.termsAndConditions = Array.isArray(data.termsAndConditions)
+      ? data.termsAndConditions
+          .map((t) => (typeof t === "string" ? t.trim() : String(t)))
+          .filter(Boolean)
+      : typeof data.termsAndConditions === "string" && data.termsAndConditions.trim()
+        ? [data.termsAndConditions.trim()]
+        : [];
+  }
+
   // Images: accept string or array, always store as array of strings
   if (data.images !== undefined) {
     data.images = Array.isArray(data.images)

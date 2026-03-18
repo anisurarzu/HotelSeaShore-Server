@@ -128,6 +128,25 @@ function collapsePaymentsByDateAndMethod(payments) {
   return Array.from(byKey.values()).sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
 }
 
+// payments array theke date-wise totalPaid array banabo: [{ date, totalPaid }]
+function buildPaidAmountsByDate(payments) {
+  if (!Array.isArray(payments) || payments.length === 0) return [];
+  const totalsByDate = new Map();
+  const now = new Date();
+  payments.forEach((p) => {
+    const dt = p.createdAt ? new Date(p.createdAt) : now;
+    const dateKey = dt.toISOString().slice(0, 10); // YYYY-MM-DD
+    const amount = typeof p.amount === "number" ? p.amount : Number(p.amount) || 0;
+    totalsByDate.set(dateKey, (totalsByDate.get(dateKey) || 0) + amount);
+  });
+  return Array.from(totalsByDate.entries())
+    .map(([dateStr, totalPaid]) => ({
+      date: new Date(`${dateStr}T00:00:00.000Z`),
+      totalPaid,
+    }))
+    .sort((a, b) => a.date - b.date);
+}
+
 // @desc Create a new booking
 // @route POST /api/bookings
 const createBooking = async (req, res) => {
@@ -221,6 +240,9 @@ const createBooking = async (req, res) => {
       const pm = String(bookingData.paymentMethod).trim();
       bookingData.paymentMethod = PAYMENT_METHODS.includes(pm) ? pm : "";
     }
+
+    // Date-wise total paid, based on payments[]
+    bookingData.paidAmountsByDate = buildPaidAmountsByDate(bookingData.payments);
 
     const booking = await Booking.create({
       ...bookingData,
@@ -344,6 +366,9 @@ const updateBooking = async (req, res) => {
       const merged = [...existing, ...fromDaily, ...fromBody];
       existingBooking.payments = collapsePaymentsByDateAndMethod(merged);
     }
+
+    // Update date-wise total paid array from final payments[]
+    existingBooking.paidAmountsByDate = buildPaidAmountsByDate(existingBooking.payments);
     const booking = await existingBooking.save();
 
     res.status(200).json({ message: "Booking updated successfully", booking });
@@ -499,7 +524,7 @@ const getBookingsByBookingNo = async (req, res) => {
     // Fetch full hotel data including address and details
     const hotels = await Hotel.find({ hotelID: { $in: hotelIDs } })
       .select(
-        "hotelID hotelName hotelDescription address contact location amenities images rating status totalRooms availableRooms createTime"
+        "hotelID hotelName hotelDescription address contact location amenities images rating status totalRooms availableRooms createTime checkInTime checkOutTime termsAndConditions"
       )
       .lean();
 
@@ -521,6 +546,9 @@ const getBookingsByBookingNo = async (req, res) => {
         totalRooms: hotel.totalRooms,
         availableRooms: hotel.availableRooms,
         createTime: hotel.createTime,
+        checkInTime: hotel.checkInTime || "",
+        checkOutTime: hotel.checkOutTime || "",
+        termsAndConditions: Array.isArray(hotel.termsAndConditions) ? hotel.termsAndConditions : [],
       };
     });
 
@@ -547,6 +575,9 @@ const getBookingsByBookingNo = async (req, res) => {
               totalRooms: hotelInfo.totalRooms,
               availableRooms: hotelInfo.availableRooms,
               createTime: hotelInfo.createTime,
+              checkInTime: hotelInfo.checkInTime,
+              checkOutTime: hotelInfo.checkOutTime,
+              termsAndConditions: hotelInfo.termsAndConditions,
             }
           : null,
       };
@@ -564,11 +595,51 @@ const getBookingById = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const booking = await Booking.findById(id);
+    const booking = await Booking.findById(id).lean();
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
-    res.status(200).json(booking);
+
+    // Attach hotel info (checkInTime, checkOutTime, termsAndConditions)
+    const hotel = booking.hotelID
+      ? await Hotel.findOne({ hotelID: booking.hotelID })
+          .select(
+            "hotelID hotelName hotelDescription address contact location amenities images rating status totalRooms availableRooms createTime checkInTime checkOutTime termsAndConditions"
+          )
+          .lean()
+      : null;
+
+    const hotelLogo = hotel?.images && hotel.images.length > 0 ? hotel.images[0] : null;
+    const hotelInformation = hotel?.hotelID
+      ? {
+          hotelID: hotel.hotelID,
+          hotelName: hotel.hotelName,
+          hotelDescription: hotel.hotelDescription,
+          address: hotel.address || {},
+          contact: hotel.contact || {},
+          location: hotel.location || {},
+          amenities: hotel.amenities || [],
+          images: hotel.images || [],
+          hotelLogo,
+          rating: hotel.rating,
+          status: hotel.status,
+          totalRooms: hotel.totalRooms,
+          availableRooms: hotel.availableRooms,
+          createTime: hotel.createTime,
+          checkInTime: hotel.checkInTime || "",
+          checkOutTime: hotel.checkOutTime || "",
+          termsAndConditions: Array.isArray(hotel.termsAndConditions) ? hotel.termsAndConditions : [],
+        }
+      : null;
+
+    return res.status(200).json({
+      ...booking,
+      hotelLogo,
+      hotelImages: hotel?.images || [],
+      hotelInformation,
+      // alias (frontend naming mismatch)
+      hotelInformations: hotelInformation,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

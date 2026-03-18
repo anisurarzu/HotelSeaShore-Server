@@ -243,6 +243,10 @@ const HotelSchema = new mongoose.Schema(
     },
     checkInTime: { type: String, default: "", trim: true },
     checkOutTime: { type: String, default: "", trim: true },
+    termsAndConditions: {
+      type: [String],
+      default: [],
+    },
     roomCategories: {
       type: [RoomCategorySchema],
       default: [],

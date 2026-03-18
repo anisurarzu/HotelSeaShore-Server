@@ -113,6 +113,17 @@ const BookingSchema = new mongoose.Schema(
       min: [0, "Total paid cannot be negative"],
       required: false,
     },
+    // Date-wise total paid amounts (sum of all payment methods for that date)
+    paidAmountsByDate: {
+      type: [
+        {
+          date: { type: Date, required: true },
+          totalPaid: { type: Number, required: true, min: 0 },
+        },
+      ],
+      default: [],
+      required: false,
+    },
     // Optional – payment details are in payments[] array; kept for backward compatibility only
     paymentMethod: {
       type: String,
