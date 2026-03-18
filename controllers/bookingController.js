@@ -86,24 +86,43 @@ const generateBookingNo = async () => {
 };
 
 const PAYMENT_METHODS = ["CASH", "BKASH", "NAGAD", "BANK", "CARD", "OTHER"];
-function normalizePayments(payments) {
+
+// Normalize date to UTC date-only (00:00:00.000Z) to avoid timezone day-shift
+function toUTCDateOnly(dateInput) {
+  if (dateInput == null) return null;
+  const str = typeof dateInput === "string" ? dateInput.trim() : null;
+  // Handle "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm..." reliably
+  if (str && /^\d{4}-\d{2}-\d{2}(T|$)/.test(str)) {
+    const [y, m, d] = str.slice(0, 10).split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+  }
+  const d = new Date(dateInput);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+}
+
+function normalizePayments(payments, defaultCreatedAt) {
   if (!Array.isArray(payments)) return [];
+  const fallback = toUTCDateOnly(defaultCreatedAt) || new Date();
   return payments.map((item) => ({
     paymentMethod: PAYMENT_METHODS.includes(item.paymentMethod) ? item.paymentMethod : "CASH",
     amount: typeof item.amount === "number" ? item.amount : Number(item.amount) || 0,
     transactionId: item.transactionId != null ? String(item.transactionId).trim() : "",
-    createdAt: item.createdAt ? new Date(item.createdAt) : new Date(),
+    // IMPORTANT: normalize to UTC date-only to avoid day shifting (e.g. 12 -> 11)
+    createdAt: toUTCDateOnly(item.createdAt) || fallback,
   }));
 }
 
 // dailyAmounts / invoiceDetails theke CASH payment entries; per date ses value (last wins)
-function dailyAmountsToPayments(items) {
+// createdAtOverride dile, sob entries er createdAt oi date hobe (e.g. checkInDate)
+function dailyAmountsToPayments(items, createdAtOverride) {
   if (!Array.isArray(items) || items.length === 0) return [];
   const byDate = new Map();
   const now = new Date();
+  const createdAt = toUTCDateOnly(createdAtOverride);
   items.forEach((item) => {
-    const date = item.date ? new Date(item.date) : now;
-    const dateKey = date.toISOString().slice(0, 10);
+    const date = toUTCDateOnly(item.date) || now;
+    const dateKey = new Date(date).toISOString().slice(0, 10);
     const amount = typeof item.dailyAmount === "number" ? item.dailyAmount : Number(item.dailyAmount) || 0;
     byDate.set(dateKey, { date, amount });
   });
@@ -111,7 +130,7 @@ function dailyAmountsToPayments(items) {
     paymentMethod: "CASH",
     amount,
     transactionId: "",
-    createdAt: date,
+    createdAt: createdAt || date,
   }));
 }
 
@@ -216,21 +235,28 @@ const createBooking = async (req, res) => {
 
     // All payments (initial theke) payments array er vetorei thakbe
     if (Array.isArray(bookingData.payments) && bookingData.payments.length > 0) {
-      bookingData.payments = normalizePayments(bookingData.payments);
+      bookingData.payments = normalizePayments(bookingData.payments, bookingData.checkInDate);
     } else if (bookingData.advancePayment != null || bookingData.paymentMethod || bookingData.transactionId) {
-      bookingData.payments = normalizePayments([
+      bookingData.payments = normalizePayments(
+        [
         {
           paymentMethod: bookingData.paymentMethod || "CASH",
           amount: Number(bookingData.advancePayment) || 0,
           transactionId: bookingData.transactionId || "",
         },
-      ]);
+        ],
+        bookingData.checkInDate
+      );
     } else {
       bookingData.payments = [];
     }
 
     // dailyAmounts / invoiceDetails (CASH) + normal payments – sob eki array te; per (date, method) ses value thakbe
-    const dailyPayments = dailyAmountsToPayments(bookingData.invoiceDetails || bookingData.dailyAmounts);
+    // invoice theke jodi paid insert/update hoy, oi paid date = checkInDate
+    const dailyPayments = dailyAmountsToPayments(
+      bookingData.invoiceDetails || bookingData.dailyAmounts,
+      bookingData.checkInDate
+    );
     if (dailyPayments.length > 0) {
       bookingData.payments = [...bookingData.payments, ...dailyPayments];
     }
@@ -269,10 +295,12 @@ const updateBooking = async (req, res) => {
     }));
   }
   // payments: (1) body theke explicit entries (2) invoiceDetails = daily amount – per date ses value thakbe, ager vad
-  const fromBody = Array.isArray(req.body.payments) && req.body.payments.length > 0 ? normalizePayments(req.body.payments) : [];
   const hasInvoiceDetails = Array.isArray(bookingData.invoiceDetails) && bookingData.invoiceDetails.length > 0;
-  const fromDaily = hasInvoiceDetails ? dailyAmountsToPayments(bookingData.invoiceDetails) : [];
-  if (fromBody.length > 0 || fromDaily.length > 0) delete bookingData.payments;
+  // Note: fromDaily checkInDate override will be finalized after we load existingBooking
+  const fromDaily = hasInvoiceDetails ? dailyAmountsToPayments(bookingData.invoiceDetails, bookingData.checkInDate) : [];
+  // fromBody will be normalized after we load existingBooking (to get fallback checkInDate)
+  const rawBodyPayments = Array.isArray(req.body.payments) ? req.body.payments : null;
+  if ((rawBodyPayments && rawBodyPayments.length > 0) || fromDaily.length > 0) delete bookingData.payments;
 
   // Top-level paymentMethod optional; payments array is the source of truth
   if (bookingData.paymentMethod !== undefined) {
@@ -285,6 +313,13 @@ const updateBooking = async (req, res) => {
     if (!existingBooking) {
       return res.status(404).json({ error: "Booking not found" });
     }
+    const fromBody =
+      rawBodyPayments && rawBodyPayments.length > 0
+        ? normalizePayments(rawBodyPayments, bookingData.checkInDate || existingBooking.checkInDate)
+        : [];
+    const effectiveFromDaily = hasInvoiceDetails
+      ? dailyAmountsToPayments(bookingData.invoiceDetails, bookingData.checkInDate || existingBooking.checkInDate)
+      : [];
 
     // Check if dates or room details are being updated
     const datesChanged =
@@ -349,12 +384,12 @@ const updateBooking = async (req, res) => {
       }
     }
     // payments: existing + fromDaily + fromBody merge kore, then per (date, paymentMethod) ekta single entry – last value
-    if (fromBody.length > 0 || fromDaily.length > 0) {
+    if (fromBody.length > 0 || effectiveFromDaily.length > 0) {
       let existing = Array.isArray(existingBooking.payments) ? existingBooking.payments : [];
       const datesInInvoice = new Set(
         (bookingData.invoiceDetails || []).map((item) => (item.date ? new Date(item.date).toISOString().slice(0, 10) : ""))
       );
-      if (fromDaily.length > 0 && datesInInvoice.size > 0) {
+      if (effectiveFromDaily.length > 0 && datesInInvoice.size > 0) {
         existing = existing.filter((p) => {
           if (p.paymentMethod === "CASH" && p.createdAt) {
             const d = new Date(p.createdAt).toISOString().slice(0, 10);
@@ -363,7 +398,7 @@ const updateBooking = async (req, res) => {
           return true;
         });
       }
-      const merged = [...existing, ...fromDaily, ...fromBody];
+      const merged = [...existing, ...effectiveFromDaily, ...fromBody];
       existingBooking.payments = collapsePaymentsByDateAndMethod(merged);
     }
 
