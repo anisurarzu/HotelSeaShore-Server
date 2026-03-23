@@ -36,6 +36,18 @@ router.post(
 // @desc Update an existing booking
 // @route PUT /api/bookings/:id
 router.put("/booking/:id", protect, BookingController.updateBooking);
+// @route DELETE /api/bookings/booking/:id/payments/:paymentId
+router.delete(
+  "/bookings/booking/:id/payments/:paymentId",
+  protect,
+  BookingController.clearBookingPayments
+);
+// @route DELETE /api/booking/:id/payments/:paymentId (alias)
+router.delete(
+  "/booking/:id/payments/:paymentId",
+  protect,
+  BookingController.clearBookingPayments
+);
 // @route PUT /api/booking/soft/:id – set statusID = 255 (body: canceledBy, reason)
 router.put("/booking/soft/:id", protect, BookingController.updateStatusID);
 

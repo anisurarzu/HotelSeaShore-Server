@@ -416,6 +416,43 @@ const updateBooking = async (req, res) => {
   }
 };
 
+// @desc Remove a specific payment by payment _id from a booking
+// @route DELETE /api/bookings/booking/:id/payments/:paymentId
+const clearBookingPayments = async (req, res) => {
+  const { id, paymentId } = req.params;
+  try {
+    const booking = await Booking.findById(id);
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+    if (!paymentId) {
+      return res.status(400).json({ error: "paymentId is required" });
+    }
+
+    const previousLength = Array.isArray(booking.payments) ? booking.payments.length : 0;
+    booking.payments = (booking.payments || []).filter(
+      (p) => String(p._id) !== String(paymentId)
+    );
+
+    if (booking.payments.length === previousLength) {
+      return res.status(404).json({ error: "Payment not found in this booking" });
+    }
+
+    booking.paidAmountsByDate = buildPaidAmountsByDate(booking.payments);
+    booking.totalPaid = (booking.payments || []).reduce(
+      (sum, p) => sum + (typeof p.amount === "number" ? p.amount : Number(p.amount) || 0),
+      0
+    );
+
+    await booking.save();
+    return res.status(200).json({
+      message: "Booking payment removed successfully",
+      booking,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 // @desc Get all bookings
 // @route GET /api/bookings
 const getBookings = async (req, res) => {
@@ -846,4 +883,5 @@ module.exports = {
   updateStatusID,
   softDeleteBooking,
   getBookingStats,
+  clearBookingPayments,
 };
