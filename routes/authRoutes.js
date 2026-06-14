@@ -12,6 +12,7 @@ const { protect } = require("../middleware/authMiddleware");
 const router = express.Router();
 
 router.post("/login", login);
+/* test */
 
 // Protected routes (Users & Agents page)
 router.post("/register", protect, register); // Create user (admin)
