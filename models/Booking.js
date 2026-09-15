@@ -258,6 +258,9 @@ const BookingSchema = new mongoose.Schema(
 // Add index for better query performance
 BookingSchema.index({ hotelID: 1, statusID: 1 });
 BookingSchema.index({ checkInDate: 1 });
+BookingSchema.index({ checkOutDate: 1 });
+BookingSchema.index({ hotelID: 1, checkInDate: 1, checkOutDate: 1 });
+BookingSchema.index({ hotelID: 1, statusID: 1, checkInDate: 1 });
 BookingSchema.index({ bookingNo: 1 });
 BookingSchema.index({ invoiceNo: 1 });
 BookingSchema.index({ statusID: 1 });

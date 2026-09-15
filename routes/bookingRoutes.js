@@ -7,9 +7,17 @@ const BookingController = require("../controllers/bookingController");
 // @route POST /api/bookings
 router.post("/booking", protect, BookingController.createBooking);
 
-// @desc Get all bookings
+// @desc Compact dashboard metrics (must be before /bookings/:id-style routes)
+// @route GET /api/bookings/dashboard?hotelID=
+router.get("/bookings/dashboard", protect, BookingController.getDashboardSummary);
+
+// @desc Get bookings (optional: hotelID, startDate, endDate, mode, fields, page, limit)
 // @route GET /api/bookings
 router.get("/bookings", protect, BookingController.getBookings);
+
+// @desc Get booking stats (legacy)
+// @route GET /api/bookings/stats
+router.get("/bookings/stats", protect, BookingController.getBookingStats);
 
 // @desc Get bookings by check-in date
 // @route GET /api/bookings/checkIn?checkInDate=YYYY-MM-DD
