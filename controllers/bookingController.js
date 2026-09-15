@@ -456,6 +456,10 @@ const clearBookingPayments = async (req, res) => {
 const LIGHT_BOOKING_FIELDS =
   "_id fullName bookingNo phone hotelID hotelName roomCategoryID roomCategoryName roomNumberID roomNumberName roomPrice checkInDate checkOutDate nights totalBill advancePayment duePayment totalPaid statusID bookedBy bookedByID paymentMethod payments paidAmountsByDate createdAt updatedAt";
 
+const BOOKINGS_HARD_MAX_LIMIT = 500;
+const BOOKINGS_DEFAULT_LIMIT = 200;
+const BOOKINGS_DATE_SCOPED_DEFAULT_LIMIT = 500;
+
 function parseDhakaYmd(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Dhaka",
@@ -512,131 +516,213 @@ function roomKeyFromBooking(booking) {
   return null;
 }
 
-// @desc Get bookings (supports filters / pagination / light fields)
+function parseYmdQuery(raw) {
+  if (typeof raw === "string" && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    const [yy, mm, dd] = raw.slice(0, 10).split("-").map(Number);
+    return utcDateOnly(yy, mm, dd);
+  }
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return utcDateOnly(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
+
+/**
+ * Shared list filter builder for GET /bookings and GET /bookings/count.
+ * Returns { filter, error, hasDateRange, mode }.
+ */
+function buildBookingsListFilter(query = {}) {
+  const {
+    hotelID,
+    startDate,
+    endDate,
+    mode = "checkIn",
+    excludeCancelled,
+    bookedByID,
+    statusID,
+    minDue,
+  } = query;
+
+  const filter = buildValidBookingMatch();
+  const hasDateRange =
+    (startDate != null && String(startDate).trim() !== "") ||
+    (endDate != null && String(endDate).trim() !== "");
+
+  if (hotelID != null && String(hotelID).trim() !== "") {
+    const numericHotelID = Number(hotelID);
+    if (Number.isNaN(numericHotelID)) {
+      return { error: { status: 400, body: { error: "Invalid hotelID. Must be a number." } } };
+    }
+    filter.hotelID = numericHotelID;
+  }
+
+  // Default: exclude cancelled unless explicitly excludeCancelled=0/false
+  const includeCancelled =
+    excludeCancelled === "0" ||
+    excludeCancelled === "false" ||
+    excludeCancelled === false;
+  if (!includeCancelled) {
+    filter.statusID = { $ne: 255 };
+  }
+
+  if (statusID != null && String(statusID).trim() !== "") {
+    filter.statusID = Number(statusID);
+  }
+
+  if (bookedByID) {
+    filter.$or = [{ bookedByID: String(bookedByID) }, { bookedBy: String(bookedByID) }];
+  }
+
+  if (minDue != null && String(minDue).trim() !== "") {
+    const due = Number(minDue);
+    if (!Number.isNaN(due)) {
+      filter.duePayment = { $gt: due };
+    }
+  }
+
+  if (hasDateRange) {
+    const ymdStart = parseYmdQuery(startDate);
+    const ymdEndRaw = parseYmdQuery(endDate);
+    if ((startDate && !ymdStart) || (endDate && !ymdEndRaw)) {
+      return {
+        error: {
+          status: 400,
+          body: { error: "Invalid startDate/endDate. Use YYYY-MM-DD." },
+        },
+      };
+    }
+    const ymdEnd = ymdEndRaw ? endOfUtcDay(ymdEndRaw) : null;
+
+    if (mode === "overlap") {
+      if (ymdEnd) filter.checkInDate = { ...(filter.checkInDate || {}), $lte: ymdEnd };
+      if (ymdStart) filter.checkOutDate = { ...(filter.checkOutDate || {}), $gt: ymdStart };
+    } else if (mode === "checkOut") {
+      filter.checkOutDate = {};
+      if (ymdStart) filter.checkOutDate.$gte = ymdStart;
+      if (ymdEnd) filter.checkOutDate.$lte = ymdEnd;
+    } else {
+      filter.checkInDate = {};
+      if (ymdStart) filter.checkInDate.$gte = ymdStart;
+      if (ymdEnd) filter.checkInDate.$lte = ymdEnd;
+    }
+  }
+
+  return { filter, hasDateRange, mode };
+}
+
+function resolveBookingsLimit(query = {}, { hasDateRange } = {}) {
+  const raw = query.limit;
+  const parsed = raw != null && String(raw).trim() !== "" ? parseInt(raw, 10) : NaN;
+  const fallback = hasDateRange
+    ? BOOKINGS_DATE_SCOPED_DEFAULT_LIMIT
+    : BOOKINGS_DEFAULT_LIMIT;
+  const requested = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Math.min(BOOKINGS_HARD_MAX_LIMIT, requested);
+}
+
+// @desc Get bookings (requires date range OR pagination — no full dumps)
 // @route GET /api/bookings
 // Query: hotelID, startDate, endDate, mode=overlap|checkIn|checkOut,
-//        excludeCancelled=1, fields=light|full, page, limit, bookedByID, statusID
+//        excludeCancelled=1|0, fields=light|full, page, limit, bookedByID, statusID, minDue
 const getBookings = async (req, res) => {
   try {
-    const {
-      hotelID,
-      startDate,
-      endDate,
-      mode = "checkIn",
-      excludeCancelled,
-      fields,
-      page,
-      limit,
-      bookedByID,
-      statusID,
-    } = req.query;
-
-    const filter = buildValidBookingMatch();
-
-    if (hotelID != null && String(hotelID).trim() !== "") {
-      const numericHotelID = Number(hotelID);
-      if (Number.isNaN(numericHotelID)) {
-        return res.status(400).json({ error: "Invalid hotelID. Must be a number." });
-      }
-      filter.hotelID = numericHotelID;
+    const { fields, page, limit } = req.query;
+    const built = buildBookingsListFilter(req.query);
+    if (built.error) {
+      return res.status(built.error.status).json(built.error.body);
     }
 
-    if (excludeCancelled === "1" || excludeCancelled === "true") {
-      filter.statusID = { $ne: 255 };
-    }
+    const { filter, hasDateRange } = built;
+    const hasPage =
+      page != null && String(page).trim() !== "" && !Number.isNaN(parseInt(page, 10));
+    const hasLimit =
+      limit != null && String(limit).trim() !== "" && !Number.isNaN(parseInt(limit, 10));
 
-    if (statusID != null && String(statusID).trim() !== "") {
-      filter.statusID = Number(statusID);
-    }
-
-    if (bookedByID) {
-      filter.$or = [{ bookedByID: String(bookedByID) }, { bookedBy: String(bookedByID) }];
-    }
-
-    const { minDue } = req.query;
-    if (minDue != null && String(minDue).trim() !== "") {
-      const due = Number(minDue);
-      if (!Number.isNaN(due)) {
-        filter.duePayment = { $gt: due };
-      }
-    }
-
-    if (startDate || endDate) {
-      const start = startDate ? new Date(startDate) : null;
-      const end = endDate ? new Date(endDate) : null;
-      if ((startDate && Number.isNaN(start?.getTime())) || (endDate && Number.isNaN(end?.getTime()))) {
-        return res.status(400).json({ error: "Invalid startDate/endDate. Use YYYY-MM-DD." });
-      }
-
-      const rangeStart = start ? utcDateOnly(
-        start.getUTCFullYear(),
-        start.getUTCMonth() + 1,
-        start.getUTCDate()
-      ) : null;
-      const rangeEnd = end
-        ? endOfUtcDay(
-            utcDateOnly(end.getUTCFullYear(), end.getUTCMonth() + 1, end.getUTCDate())
-          )
-        : null;
-
-      // Prefer YYYY-MM-DD string parsing to avoid TZ shift
-      const parseYmd = (raw) => {
-        if (typeof raw === "string" && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
-          const [yy, mm, dd] = raw.slice(0, 10).split("-").map(Number);
-          return utcDateOnly(yy, mm, dd);
-        }
-        return null;
-      };
-      const ymdStart = parseYmd(startDate) || rangeStart;
-      const ymdEnd = parseYmd(endDate)
-        ? endOfUtcDay(parseYmd(endDate))
-        : rangeEnd;
-
-      if (mode === "overlap") {
-        // Stay overlaps [start, end]: checkIn <= end AND checkOut > start
-        if (ymdEnd) filter.checkInDate = { ...(filter.checkInDate || {}), $lte: ymdEnd };
-        if (ymdStart) filter.checkOutDate = { ...(filter.checkOutDate || {}), $gt: ymdStart };
-      } else if (mode === "checkOut") {
-        filter.checkOutDate = {};
-        if (ymdStart) filter.checkOutDate.$gte = ymdStart;
-        if (ymdEnd) filter.checkOutDate.$lte = ymdEnd;
-      } else {
-        // default: check-in within range
-        filter.checkInDate = {};
-        if (ymdStart) filter.checkInDate.$gte = ymdStart;
-        if (ymdEnd) filter.checkInDate.$lte = ymdEnd;
-      }
-    }
-
-    const useLight = fields === "light" || fields === "summary";
-    const pageNum = page != null ? Math.max(1, parseInt(page, 10) || 1) : null;
-    const limitNum = Math.min(1000, Math.max(1, parseInt(limit, 10) || 100));
-    const paginate = pageNum != null;
-
-    let query = Booking.find(filter).sort({ createdAt: -1 });
-    if (useLight) query = query.select(LIGHT_BOOKING_FIELDS);
-
-    if (paginate) {
-      const skip = (pageNum - 1) * limitNum;
-      const [total, bookings] = await Promise.all([
-        Booking.countDocuments(filter),
-        query.skip(skip).limit(limitNum).lean(),
-      ]);
-      return res.status(200).json({
-        data: bookings,
-        pagination: {
-          page: pageNum,
-          limit: limitNum,
-          total,
-          totalPages: Math.ceil(total / limitNum) || 0,
-          hasMore: skip + bookings.length < total,
-        },
+    // Guard: bare / weakly filtered calls cannot dump full history
+    if (!hasDateRange && !hasPage && !hasLimit) {
+      return res.status(400).json({
+        error:
+          "Unbounded booking list is not allowed. Provide startDate and endDate, or page and limit.",
+        hint: "/bookings?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&mode=overlap&fields=light&limit=200",
+        alternatives: [
+          "GET /bookings/dashboard?hotelID=...",
+          "GET /bookings/count?hotelID=...&startDate=...&endDate=...",
+        ],
       });
     }
 
-    // Non-paginated: still allow filtered/light responses (array for backward compat)
-    const bookings = await query.lean();
-    res.status(200).json(bookings);
+    // fields=full still requires a date scope + stays paginated
+    const useFull = fields === "full";
+    if (useFull && !hasDateRange) {
+      return res.status(400).json({
+        error: "fields=full requires startDate and endDate (and is still paginated).",
+        hint: "/bookings?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&fields=full&page=1&limit=100",
+      });
+    }
+
+    const pageNum = hasPage ? Math.max(1, parseInt(page, 10) || 1) : 1;
+    const limitNum = resolveBookingsLimit(req.query, { hasDateRange });
+    const skip = (pageNum - 1) * limitNum;
+
+    if (useFull || limitNum >= BOOKINGS_HARD_MAX_LIMIT) {
+      console.warn(
+        `[bookings] heavy list request fields=${useFull ? "full" : "light"} limit=${limitNum} page=${pageNum} hotelID=${req.query.hotelID || "-"} ip=${req.ip}`
+      );
+    }
+
+    let query = Booking.find(filter).sort({ createdAt: -1 });
+    if (!useFull) {
+      query = query.select(LIGHT_BOOKING_FIELDS);
+    }
+
+    const [total, bookings] = await Promise.all([
+      Booking.countDocuments(filter),
+      query.skip(skip).limit(limitNum).lean(),
+    ]);
+
+    return res.status(200).json({
+      data: bookings,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum) || 0,
+        hasMore: skip + bookings.length < total,
+      },
+      meta: {
+        fields: useFull ? "full" : "light",
+        excludeCancelled: filter.statusID && filter.statusID.$ne === 255,
+        mode: built.mode || "checkIn",
+        dateScoped: hasDateRange,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc Count bookings for current filters (no document dump)
+// @route GET /api/bookings/count
+const getBookingsCount = async (req, res) => {
+  try {
+    const built = buildBookingsListFilter(req.query);
+    if (built.error) {
+      return res.status(built.error.status).json(built.error.body);
+    }
+    const total = await Booking.countDocuments(built.filter);
+    return res.status(200).json({
+      total,
+      filters: {
+        hotelID: req.query.hotelID != null ? Number(req.query.hotelID) : null,
+        startDate: req.query.startDate || null,
+        endDate: req.query.endDate || null,
+        mode: built.mode || "checkIn",
+        excludeCancelled: !(
+          req.query.excludeCancelled === "0" ||
+          req.query.excludeCancelled === "false"
+        ),
+      },
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1536,6 +1622,7 @@ module.exports = {
   createBooking,
   updateBooking,
   getBookings,
+  getBookingsCount,
   getDashboardSummary,
   getBookingsByHotelId,
   getBookingsByCheckInDate,

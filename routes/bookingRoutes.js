@@ -11,7 +11,11 @@ router.post("/booking", protect, BookingController.createBooking);
 // @route GET /api/bookings/dashboard?hotelID=
 router.get("/bookings/dashboard", protect, BookingController.getDashboardSummary);
 
-// @desc Get bookings (optional: hotelID, startDate, endDate, mode, fields, page, limit)
+// @desc Count bookings for filters (no document dump)
+// @route GET /api/bookings/count
+router.get("/bookings/count", protect, BookingController.getBookingsCount);
+
+// @desc Get bookings (requires startDate+endDate OR page/limit — no full dumps)
 // @route GET /api/bookings
 router.get("/bookings", protect, BookingController.getBookings);
 

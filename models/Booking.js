@@ -261,9 +261,12 @@ BookingSchema.index({ checkInDate: 1 });
 BookingSchema.index({ checkOutDate: 1 });
 BookingSchema.index({ hotelID: 1, checkInDate: 1, checkOutDate: 1 });
 BookingSchema.index({ hotelID: 1, statusID: 1, checkInDate: 1 });
+BookingSchema.index({ hotelID: 1, statusID: 1, checkOutDate: 1 });
+BookingSchema.index({ statusID: 1, checkInDate: 1, checkOutDate: 1 });
 BookingSchema.index({ bookingNo: 1 });
 BookingSchema.index({ invoiceNo: 1 });
 BookingSchema.index({ statusID: 1 });
+BookingSchema.index({ createdAt: -1 });
 
 // Pre-save hook to calculate due payment
 BookingSchema.pre("save", function(next) {
