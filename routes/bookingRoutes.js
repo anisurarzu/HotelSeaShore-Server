@@ -60,14 +60,14 @@ router.delete(
   protect,
   BookingController.clearBookingPayments
 );
-// @route PUT /api/booking/soft/:id – set statusID = 255 (body: canceledBy, reason)
+// @route PUT /api/booking/soft/:id – cancel booking (statusID = 4)
 router.put("/booking/soft/:id", protect, BookingController.updateStatusID);
 
-// @desc Soft delete booking (set statusID = 255)
+// @desc Cancel booking (statusID = 4, still visible as Cancelled)
 // @route DELETE /api/booking/soft/:id
 router.delete("/booking/soft/:id", protect, BookingController.softDeleteBooking);
 
-// @desc Hard delete booking (remove from database)
+// @desc Soft-hide booking (statusID = 255, hidden from UI, kept in DB)
 // @route DELETE /api/booking/:id
 router.delete("/booking/:id", protect, BookingController.deleteBooking);
 

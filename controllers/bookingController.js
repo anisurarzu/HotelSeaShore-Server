@@ -13,7 +13,7 @@ const checkBookingOverlap = async (hotelID, roomNumberID, roomCategoryID, checkI
       hotelID: hotelID,
       roomNumberID: roomNumberID,
       roomCategoryID: roomCategoryID,
-      statusID: { $ne: 255 }, // Exclude cancelled bookings
+      statusID: { $nin: [4, 255] }, // Exclude cancelled (4) and deleted (255) from overlap
       // Check for date overlap: existing.checkInDate < newCheckOut AND newCheckIn < existing.checkOutDate
       checkInDate: { $lt: newCheckOut },
       checkOutDate: { $gt: newCheckIn },
@@ -738,7 +738,7 @@ const getDashboardSummary = async (req, res) => {
         ? Number(hotelIDRaw)
         : null;
 
-    const baseMatch = buildValidBookingMatch({ statusID: { $ne: 255 } });
+    const baseMatch = buildValidBookingMatch({ statusID: { $nin: [4, 255] } });
     if (Number.isFinite(hotelID) && hotelID > 0) {
       baseMatch.hotelID = hotelID;
     }
@@ -1246,9 +1246,10 @@ const getBookingsByHotelId = async (req, res) => {
         .json({ error: "Invalid hotelID. Must be a number." });
     }
 
-    // Find all bookings associated with the given hotelID, exclude cancelled, and filter invalid
+    // Find bookings for hotel; exclude soft-deleted (255). Cancelled (4) still returned.
     const bookings = await Booking.find({
       hotelID: numericHotelID,
+      statusID: { $ne: 255 },
       fullName: { $exists: true, $ne: null, $ne: "" },
       bookingNo: { $exists: true, $ne: null, $ne: "" },
     })
@@ -1464,20 +1465,21 @@ const getBookingById = async (req, res) => {
   }
 };
 
-/* -------------- soft delete----- */
+/* -------------- cancel (visible) vs soft-delete (hidden) ----- */
 
+// @desc Cancel booking — statusID 4 (stays in lists, marked Cancelled)
+// @route PUT /api/booking/soft/:id
 const updateStatusID = async (req, res) => {
   const { id } = req.params;
-  const { canceledBy, reason } = req.body; // Get both canceledBy and reason from the request body
+  const { canceledBy, reason } = req.body;
 
   try {
-    // Use runValidators to enforce schema validation on updates
     const booking = await Booking.findByIdAndUpdate(
       id,
       {
-        statusID: 255,
-        canceledBy, // Update the canceledBy field
-        reason, // Update the reason field as well
+        statusID: 4,
+        canceledBy,
+        reason,
       },
       { new: true, runValidators: true }
     );
@@ -1487,15 +1489,16 @@ const updateStatusID = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Booking status updated to 255, canceledBy and reason updated.",
-      updatedBooking: booking, // Optionally include the updated booking object for debugging
+      message: "Booking cancelled successfully.",
+      updatedBooking: booking,
+      booking,
     });
   } catch (error) {
     res.status(500).json({ error: "Server error", details: error.message });
   }
 };
 
-// @desc Soft delete a booking (set statusID = 255)
+// @desc Cancel booking — statusID 4 (visible Cancelled; frees room for overlap)
 // @route DELETE /api/booking/soft/:id
 const softDeleteBooking = async (req, res) => {
   const { id } = req.params;
@@ -1504,29 +1507,48 @@ const softDeleteBooking = async (req, res) => {
   try {
     const booking = await Booking.findByIdAndUpdate(
       id,
-      { statusID: 255, ...(canceledBy != null && { canceledBy }), ...(reason != null && { reason }) },
-      { new: true }
+      {
+        statusID: 4,
+        ...(canceledBy != null && { canceledBy }),
+        ...(reason != null && { reason }),
+      },
+      { new: true, runValidators: true }
     );
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
-    res.status(200).json({ message: "Booking deleted successfully", booking });
+    res.status(200).json({
+      message: "Booking cancelled successfully.",
+      booking,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// @desc Delete a booking – HARD DELETE (permanently remove from database)
+// @desc Soft-hide booking — statusID 255 (hidden from UI; kept in DB)
 // @route DELETE /api/booking/:id
 const deleteBooking = async (req, res) => {
   const { id } = req.params;
+  const { deletedBy, reason } = req.body || {};
 
   try {
-    const booking = await Booking.findByIdAndDelete(id); // Hard delete – document removed from DB
+    const booking = await Booking.findByIdAndUpdate(
+      id,
+      {
+        statusID: 255,
+        ...(deletedBy != null && { canceledBy: deletedBy }),
+        ...(reason != null && { reason }),
+      },
+      { new: true, runValidators: true }
+    );
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
-    res.status(200).json({ message: "Booking deleted successfully" });
+    res.status(200).json({
+      message: "Booking removed from system (soft delete).",
+      booking,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1538,8 +1560,8 @@ const getBookingStats = async (req, res) => {
   try {
     const { hotelID, startDate, endDate, statusID } = req.query;
 
-    // Build filter - exclude cancelled bookings by default
-    const filter = { statusID: { $ne: 255 } };
+    // Build filter - exclude deleted + cancelled from operational stats
+    const filter = { statusID: { $nin: [4, 255] } };
 
     // Filter by hotelID if provided
     if (hotelID) {

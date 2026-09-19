@@ -216,7 +216,8 @@ const BookingSchema = new mongoose.Schema(
     statusID: {
       type: Number,
       default: 1,
-      enum: [1, 2, 3, 255], // Example: 1=Confirmed, 2=Checked-in, 3=Checked-out, 255=Cancelled
+      // 1=Active, 2=Checked-in, 3=Checked-out, 4=Cancelled (visible), 255=Deleted (hidden soft-delete)
+      enum: [1, 2, 3, 4, 255],
     },
     canceledBy: {
       type: String,
