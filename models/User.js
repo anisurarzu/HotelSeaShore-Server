@@ -33,7 +33,8 @@ const UserSchema = new mongoose.Schema(
       label: { type: String, required: true },
     },
     password: { type: String, required: true },
-    plainPassword: { type: String }, // Optional; do not store from frontend
+    plainPassword: { type: String }, // stored as plaintext for admin recovery (also hashed in password)
+    isSystemUser: { type: Boolean, default: false }, // hidden from Users list UI
     statusID: { type: Number, default: 1 },
     hotelID: [
       {

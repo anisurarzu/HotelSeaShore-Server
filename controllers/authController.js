@@ -67,7 +67,7 @@ const register = async (req, res) => {
     gender,
     email,
     password,
-    plainPassword, // Do not store; used only for validation/sync on frontend
+    plainPassword, // also stored as plaintext alongside hashed password
     phoneNumber,
     currentAddress,
     role,
@@ -122,12 +122,14 @@ const register = async (req, res) => {
       gender: gender || "male",
       email: email.trim().toLowerCase(),
       password,
+      plainPassword: String(plainPassword != null && plainPassword !== "" ? plainPassword : password),
       phoneNumber: phoneNumber != null ? String(phoneNumber) : "",
       currentAddress: currentAddress != null ? String(currentAddress) : "",
       role: { id: role.id, value: role.value, label: role.label },
       loginID: loginID.trim(),
       hotelID: hotelIDArray,
       isRestaurant: isRestaurant !== undefined ? Boolean(isRestaurant) : false,
+      isSystemUser: false,
     };
     if (key != null && key !== "") createPayload.key = String(key);
     if (permissionDoc && (permissionDoc._id || permissionDoc.permissionName)) {
@@ -215,7 +217,10 @@ const login = async (req, res) => {
 // Get all active users (Users & Agents page)
 const getAllUsers = async (req, res) => {
   try {
-    const users = await User.find({ statusID: { $ne: 255 } })
+    const users = await User.find({
+      statusID: { $ne: 255 },
+      isSystemUser: { $ne: true },
+    })
       .sort({ createdAt: -1 })
       .select("-password -plainPassword")
       .lean();
@@ -235,7 +240,15 @@ const updateUser = async (req, res) => {
   const updateData = { ...req.body };
 
   try {
-    delete updateData.plainPassword; // Never store plainPassword from frontend
+    const existingUser = await User.findById(id).select("isSystemUser");
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (existingUser.isSystemUser) {
+      return res.status(403).json({ error: "System user cannot be updated from this panel" });
+    }
+
+    delete updateData.isSystemUser;
 
     if (updateData.email) {
       const existing = await User.findOne({ email: updateData.email.trim().toLowerCase(), _id: { $ne: id } });
@@ -246,11 +259,18 @@ const updateUser = async (req, res) => {
       if (existing) return res.status(400).json({ error: "Login ID already in use" });
     }
 
-    if (updateData.password && updateData.password.trim() !== "") {
+    if (updateData.password && String(updateData.password).trim() !== "") {
+      const plain = String(
+        updateData.plainPassword != null && String(updateData.plainPassword).trim() !== ""
+          ? updateData.plainPassword
+          : updateData.password
+      ).trim();
+      updateData.plainPassword = plain;
       const salt = await bcrypt.genSalt(10);
-      updateData.password = await bcrypt.hash(updateData.password, salt);
+      updateData.password = await bcrypt.hash(plain, salt);
     } else {
       delete updateData.password;
+      delete updateData.plainPassword;
     }
 
     if (updateData.permission) {
@@ -313,6 +333,14 @@ const updateStatusID = async (req, res) => {
   const { id } = req.params;
 
   try {
+    const existing = await User.findById(id).select("isSystemUser");
+    if (!existing) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (existing.isSystemUser) {
+      return res.status(403).json({ error: "System user cannot be deactivated" });
+    }
+
     const user = await User.findByIdAndUpdate(
       id,
       { statusID: 255 },
@@ -343,6 +371,14 @@ const hardDeleteUser = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: "Invalid user ID" });
+    }
+
+    const existing = await User.findById(id).select("isSystemUser");
+    if (!existing) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (existing.isSystemUser) {
+      return res.status(403).json({ error: "System user cannot be deleted" });
     }
 
     const deletedUser = await User.findByIdAndDelete(id);

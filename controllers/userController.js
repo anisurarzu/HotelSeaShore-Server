@@ -64,7 +64,10 @@ function formatUser(user, hotelNameMap = {}) {
 // GET /api/users – list all active users (Users & Agents page)
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find({ statusID: { $ne: 255 } })
+    const users = await User.find({
+      statusID: { $ne: 255 },
+      isSystemUser: { $ne: true },
+    })
       .sort({ createdAt: -1 })
       .select("-password -plainPassword")
       .lean();
@@ -146,12 +149,14 @@ const createUser = async (req, res) => {
       gender: gender || "male",
       email: email.trim().toLowerCase(),
       password,
+      plainPassword: String(plainPassword != null && plainPassword !== "" ? plainPassword : password),
       phoneNumber: phoneNumber != null ? String(phoneNumber) : "",
       currentAddress: currentAddress != null ? String(currentAddress) : "",
       role: { id: role.id, value: role.value, label: role.label },
       loginID: loginID.trim(),
       hotelID: hotelIDArray,
       isRestaurant: isRestaurant !== undefined ? Boolean(isRestaurant) : false,
+      isSystemUser: false,
     };
     if (key != null && key !== "") createPayload.key = String(key);
     if (permissionDoc && (permissionDoc._id || permissionDoc.permissionName)) {
@@ -184,7 +189,16 @@ const updateUser = async (req, res) => {
   const updateData = { ...req.body };
 
   try {
-    delete updateData.plainPassword;
+    const existingUser = await User.findById(id).select("isSystemUser");
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (existingUser.isSystemUser) {
+      return res.status(403).json({ error: "System user cannot be updated from this panel" });
+    }
+
+    // Never allow clients to flip system flag
+    delete updateData.isSystemUser;
 
     if (updateData.email) {
       const existing = await User.findOne({
@@ -201,11 +215,18 @@ const updateUser = async (req, res) => {
       if (existing) return res.status(400).json({ error: "Login ID already in use" });
     }
 
-    if (updateData.password && updateData.password.trim() !== "") {
+    if (updateData.password && String(updateData.password).trim() !== "") {
+      const plain = String(
+        updateData.plainPassword != null && String(updateData.plainPassword).trim() !== ""
+          ? updateData.plainPassword
+          : updateData.password
+      ).trim();
+      updateData.plainPassword = plain;
       const salt = await bcrypt.genSalt(10);
-      updateData.password = await bcrypt.hash(updateData.password, salt);
+      updateData.password = await bcrypt.hash(plain, salt);
     } else {
       delete updateData.password;
+      delete updateData.plainPassword;
     }
 
     if (updateData.permission) {
@@ -277,10 +298,15 @@ const deleteUser = async (req, res) => {
       return res.status(400).json({ error: "Invalid user ID" });
     }
 
-    const deletedUser = await User.findByIdAndDelete(id);
+    const deletedUser = await User.findById(id);
     if (!deletedUser) {
       return res.status(404).json({ error: "User not found" });
     }
+    if (deletedUser.isSystemUser) {
+      return res.status(403).json({ error: "System user cannot be deleted" });
+    }
+
+    await User.findByIdAndDelete(id);
 
     res.status(200).json({ message: "User deleted" });
   } catch (error) {
